@@ -38,6 +38,23 @@ bun run start start
 The server listens only on `http://127.0.0.1:4141` by default. Here,
 `GITHUB_COPILOT_API_KEY` is the local gateway key, not a GitHub token.
 
+On macOS, the hardened Codex CLI/Desktop setup can be recreated without
+copying or changing the existing OpenAI authorization:
+
+```sh
+./scripts/setup-codex-copilot-macos.sh
+```
+
+This creates an isolated `~/.codex-copilot`, installs the `codex-copilot` and
+`copilot-usage` commands, and registers **ChatGPT Copilot** and
+**ChatGPT OpenAI** in Spotlight. It generates the local gateway key on the
+machine and never commits it.
+
+Run `copilot-usage` to see the account-wide GitHub Copilot AI-credit/premium
+interaction quota plus the last 30 days of local gateway requests, tokens, and
+provider-reported AI units. GitHub does not attribute account quota usage to a
+specific Copilot client.
+
 Verify the gateway is up:
 
 ```sh
@@ -684,6 +701,7 @@ Copilot API now uses a subcommand structure with these main commands:
 - `start`: Start the loopback-only gateway. In the default Copilot-only mode, missing GitHub credentials are a fatal error.
 - `auth`: Run GitHub Copilot login or manage gateway API keys. Direct-provider login is rejected while `copilotOnly` is enabled.
 - `debug`: Display diagnostic information including version, runtime details, file paths, and authentication status. Useful for troubleshooting and support.
+- `usage`: Show account-wide GitHub Copilot AI-credit quotas and the last 30 days of locally recorded gateway usage.
 
 ## Command Line Options
 

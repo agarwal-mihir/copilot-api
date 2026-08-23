@@ -55,6 +55,7 @@ if (isMcpFastPath(process.argv)) {
   const { debug } = await import("./debug")
   const { mcp } = await import("./mcp")
   const { start } = await import("./start")
+  const { usage } = await import("./usage")
 
   const main = defineCommand({
     meta: {
@@ -62,7 +63,7 @@ if (isMcpFastPath(process.argv)) {
       description:
         "A wrapper around GitHub Copilot API to make it OpenAI compatible, making it usable for other tools.",
     },
-    subCommands: { auth, start, debug, mcp },
+    subCommands: { auth, start, debug, mcp, usage },
     args: cliArgs,
   })
 

@@ -47,23 +47,23 @@ export const getCopilotAccountType = async (
 }
 
 export interface QuotaDetail {
-  entitlement: number
-  overage_count: number
-  overage_permitted: boolean
-  percent_remaining: number
-  quota_id: string
-  quota_remaining: number
-  remaining: number
-  unlimited: boolean
+  entitlement?: number
+  overage_count?: number
+  overage_permitted?: boolean
+  percent_remaining?: number
+  quota_id?: string
+  quota_remaining?: number
+  remaining?: number
+  unlimited?: boolean
 }
 
-interface QuotaSnapshots {
-  chat: QuotaDetail
-  completions: QuotaDetail
-  premium_interactions: QuotaDetail
+export interface QuotaSnapshots {
+  chat?: QuotaDetail
+  completions?: QuotaDetail
+  premium_interactions?: QuotaDetail
 }
 
-interface CopilotUsageResponse {
+export interface CopilotUsageResponse {
   login: string
   access_type_sku: string
   analytics_tracking_id: string
@@ -73,8 +73,8 @@ interface CopilotUsageResponse {
   copilot_plan?: string
   organization_login_list: Array<unknown>
   organization_list: Array<unknown>
-  quota_reset_date: string
-  quota_snapshots: QuotaSnapshots
+  quota_reset_date?: string
+  quota_snapshots?: QuotaSnapshots
   endpoints: {
     api: string
     telemetry: string
