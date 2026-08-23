@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url"
 interface ConfigFileShape {
   alphaSearchCodexPriority?: boolean
   builtinProviders?: Record<string, unknown>
+  copilotOnly?: unknown
   contextManagement?: {
     messages?: boolean
     responses?: boolean
@@ -108,7 +109,7 @@ describe("builtin provider config", () => {
     })
   })
 
-  test("enables alpha search Codex priority by default", () => {
+  test("disables alpha search Codex priority by default", () => {
     const tempDir = createTempConfigDir()
     const configPath = path.join(tempDir, "config.json")
 
@@ -117,13 +118,30 @@ describe("builtin provider config", () => {
       'const { isAlphaSearchCodexPriorityEnabled } = await import("./src/lib/config"); console.log(JSON.stringify(isAlphaSearchCodexPriorityEnabled()));',
     )
 
-    expect(JSON.parse(output)).toBe(true)
-    expect(readConfigFile(configPath).alphaSearchCodexPriority).toBe(true)
+    expect(JSON.parse(output)).toBe(false)
+    expect(readConfigFile(configPath).alphaSearchCodexPriority).toBe(false)
   })
 
-  test("allows disabling alpha search Codex priority", () => {
+  test("allows alpha search Codex priority outside copilot-only mode", () => {
     const tempDir = createTempConfigDir()
-    writeConfigFile(tempDir, { alphaSearchCodexPriority: false })
+    writeConfigFile(tempDir, {
+      alphaSearchCodexPriority: true,
+      copilotOnly: false,
+    })
+
+    const output = runScript(
+      tempDir,
+      'const { isAlphaSearchCodexPriorityEnabled } = await import("./src/lib/config"); console.log(JSON.stringify(isAlphaSearchCodexPriorityEnabled()));',
+    )
+
+    expect(JSON.parse(output)).toBe(true)
+  })
+
+  test("keeps alpha search Codex priority disabled for existing configs", () => {
+    const tempDir = createTempConfigDir()
+    writeConfigFile(tempDir, {
+      copilotOnly: false,
+    })
 
     const output = runScript(
       tempDir,
@@ -131,6 +149,20 @@ describe("builtin provider config", () => {
     )
 
     expect(JSON.parse(output)).toBe(false)
+  })
+
+  test("only literal false disables copilot-only mode", () => {
+    const tempDir = createTempConfigDir()
+    writeConfigFile(tempDir, {
+      copilotOnly: 0,
+    })
+
+    const output = runScript(
+      tempDir,
+      'const { isCopilotOnlyMode } = await import("./src/lib/config"); console.log(JSON.stringify(isCopilotOnlyMode()));',
+    )
+
+    expect(JSON.parse(output)).toBe(true)
   })
 
   test("allows overriding context management per endpoint", () => {

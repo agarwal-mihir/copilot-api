@@ -7,8 +7,12 @@ import { serve, type ServerHandler } from "srvx"
 import invariant from "tiny-invariant"
 
 import { runProviderSetup } from "./auth"
-import { listEnabledProviders, mergeConfigWithDefaults } from "./lib/config"
-import { readGitHubToken } from "./lib/credential-store"
+import {
+  isCopilotOnlyMode,
+  listEnabledProviders,
+  mergeConfigWithDefaults,
+} from "./lib/config"
+import { readGitHubToken, readGitHubTokenFile } from "./lib/credential-store"
 import { getLatestModelForFamily } from "./lib/models"
 import { initOpencodeVersion } from "./lib/opencode"
 import { ensurePaths } from "./lib/paths"
@@ -28,7 +32,7 @@ import {
 interface RunServerOptions {
   port: number
   verbose: boolean
-  githubToken?: string
+  githubTokenFile?: string
   claudeCode: boolean
   showToken: boolean
   proxyEnv: boolean
@@ -125,6 +129,12 @@ async function setupProviderMode(
   serverUrl: string,
   claudeCode: boolean,
 ): Promise<void> {
+  if (isCopilotOnlyMode()) {
+    throw new Error(
+      "GitHub Copilot credentials are required while copilotOnly is enabled. Run `copilot-api auth login --provider copilot`.",
+    )
+  }
+
   const enabledProviders = listEnabledProviders()
 
   if (enabledProviders.length > 0) {
@@ -159,7 +169,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   const missingApiKeysMessage = getMissingApiKeysMessage()
   if (missingApiKeysMessage) {
-    consola.info(missingApiKeysMessage)
+    consola.warn(missingApiKeysMessage)
   }
 
   await initOpencodeVersion()
@@ -180,11 +190,19 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   const serverUrl = `http://localhost:${options.port}`
 
-  const githubToken = options.githubToken || (await readGitHubToken())
+  const githubTokenFile = options.githubTokenFile?.trim()
+  const githubToken =
+    githubTokenFile ?
+      await readGitHubTokenFile(githubTokenFile)
+    : await readGitHubToken()
+  if (githubTokenFile && !githubToken) {
+    throw new Error(`GitHub token file is empty: ${githubTokenFile}`)
+  }
+
   if (githubToken) {
     await setupCopilotMode(
       githubToken,
-      Boolean(options.githubToken),
+      Boolean(githubTokenFile),
       serverUrl,
       options.claudeCode,
     )
@@ -200,6 +218,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   serve({
     fetch: server.fetch as ServerHandler,
+    hostname: process.env.HOST?.trim() || "127.0.0.1",
     port: options.port,
     bun: {
       idleTimeout: 0,
@@ -225,11 +244,9 @@ export const start = defineCommand({
       default: false,
       description: "Enable verbose logging",
     },
-    "github-token": {
-      alias: "g",
+    "github-token-file": {
       type: "string",
-      description:
-        "Provide GitHub token directly (must be generated using the `auth` subcommand)",
+      description: "Read the GitHub token from a protected file",
     },
     "claude-code": {
       alias: "c",
@@ -253,7 +270,7 @@ export const start = defineCommand({
     return runServer({
       port: Number.parseInt(args.port, 10),
       verbose: args.verbose,
-      githubToken: args["github-token"],
+      githubTokenFile: args["github-token-file"],
       claudeCode: args["claude-code"],
       showToken: args["show-token"],
       proxyEnv: args["proxy-env"],

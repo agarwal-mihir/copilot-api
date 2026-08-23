@@ -18,14 +18,16 @@ interface CodexCredentialsShape {
 }
 
 interface ConfigFileShape {
-  providers?: {
-    codex?: {
+  copilotOnly?: boolean
+  providers?: Record<
+    string,
+    {
       type?: string
       enabled?: boolean
       baseUrl?: string
       authType?: string
     }
-  }
+  >
 }
 
 const cwd = fileURLToPath(new URL("../", import.meta.url))
@@ -43,7 +45,7 @@ function createTempDir(): string {
 function writeConfigFile(tempDir: string, config: ConfigFileShape): void {
   fs.writeFileSync(
     path.join(tempDir, "config.json"),
-    `${JSON.stringify(config, null, 2)}\n`,
+    `${JSON.stringify({ copilotOnly: false, ...config }, null, 2)}\n`,
     "utf8",
   )
 }
@@ -94,6 +96,44 @@ afterEach(() => {
 })
 
 describe("provider resolver", () => {
+  test("blocks direct providers and Anthropic token counting in copilot-only mode", () => {
+    const tempDir = createTempDir()
+    writeConfigFile(tempDir, {
+      copilotOnly: true,
+      providers: {
+        codex: {
+          type: "openai-responses",
+          enabled: true,
+          authType: "oauth2",
+          baseUrl: "https://chatgpt.com/backend-api",
+        },
+        external: {
+          type: "openai-compatible",
+          enabled: true,
+          authType: "authorization",
+          baseUrl: "https://provider.example",
+        },
+      },
+    })
+    writeCodexCredentials(tempDir, {
+      accessToken: "codex-access-token",
+      accountId: "acct_test",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      refreshToken: "codex-refresh-token",
+    })
+
+    const output = runScript(
+      tempDir,
+      'process.env.ANTHROPIC_API_KEY = "anthropic-key"; const { getAnthropicApiKey, isAlphaSearchCodexPriorityEnabled } = await import("./src/lib/config"); const { resolveProviderConfig } = await import("./src/lib/provider-resolver"); console.log(JSON.stringify({ alphaSearchCodexPriority: isAlphaSearchCodexPriorityEnabled(), anthropicApiKey: getAnthropicApiKey(), codex: await resolveProviderConfig("codex"), external: await resolveProviderConfig("external") }));',
+    )
+
+    expect(JSON.parse(output)).toEqual({
+      alphaSearchCodexPriority: false,
+      codex: null,
+      external: null,
+    })
+  })
+
   test("resolves codex from config.providers to the ChatGPT Codex backend", () => {
     const tempDir = createTempDir()
     writeConfigFile(tempDir, {

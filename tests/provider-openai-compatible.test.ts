@@ -15,6 +15,7 @@ const createNoopProviderTokenUsageRecorder = () => noopTokenUsageRecorder
 await mock.module("~/lib/config", () => ({
   ...actualConfigModule,
   getProviderConfig: () => providerConfig,
+  isCopilotOnlyMode: () => false,
 }))
 
 await mock.module("~/lib/token-usage", () => ({

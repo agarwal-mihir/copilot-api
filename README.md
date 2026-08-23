@@ -24,40 +24,48 @@
 
 ## Quick Start
 
-The fastest way to get a working gateway:
+The hardened fork runs from source and requires both GitHub Copilot login and
+a gateway API key:
 
 ```sh
-npx @jeffreycao/copilot-api@latest start
+bun install --frozen-lockfile
+bun run start auth login --provider copilot
+export GITHUB_COPILOT_API_KEY="$(openssl rand -hex 32)"
+bun run start auth keys --add "$GITHUB_COPILOT_API_KEY"
+bun run start start
 ```
 
-The server listens on `http://localhost:4141` by default. Optionally authenticate with GitHub Copilot or configure a third-party provider first:
-
-```sh
-npx @jeffreycao/copilot-api@latest auth login
-```
+The server listens only on `http://127.0.0.1:4141` by default. Here,
+`GITHUB_COPILOT_API_KEY` is the local gateway key, not a GitHub token.
 
 Verify the gateway is up:
 
 ```sh
-curl http://localhost:4141/v1/models
+curl http://127.0.0.1:4141/v1/models \
+  -H "x-api-key: $GITHUB_COPILOT_API_KEY"
 ```
 
 > [!NOTE]
-> Token usage storage requires Node.js >= 22.13.0 or Bun. See [Using with npx](#using-with-npx) for details.
+> Requests fail closed when `auth.apiKeys` is empty. Token usage storage
+> requires Node.js >= 22.13.0 or Bun.
 
 From here, jump to the guide for your client: [Claude Code](#using-with-claude-code), [OpenCode](#using-with-opencode), [Codex](#using-with-codex), or run it with [Docker](#using-with-docker).
 
 ## Highlights
 
 - **Unified API Gateway**: Serve OpenAI-compatible Chat Completions (`/v1/chat/completions`), the OpenAI Responses API (`/v1/responses`), and Anthropic-compatible Messages (`/v1/messages`) from one local endpoint.
-- **Multi-Provider**: Route GitHub Copilot, the built-in `codex` provider, and third-party providers (Kimi, DeepSeek, DashScope, OpenRouter, OpenCode Go, or a custom provider) behind the same gateway. GitHub Copilot is optional — with at least one enabled provider, the server starts in provider-only mode without a GitHub token.
+- **Copilot-only by default**: `copilotOnly: true` blocks the built-in `codex` provider, custom providers, direct Anthropic token counting, and Codex-priority search. Every model request therefore uses GitHub Copilot unless this guard is explicitly disabled.
+- **Optional Multi-Provider Mode**: Set `copilotOnly: false` only when direct egress to the configured provider is intentional.
 - **Coding Agent Ready**: First-class setups for Claude Code, OpenCode, and Codex, including the interactive `--claude-code` launcher and a merged model catalog for Codex.
 - **Streaming & WebSocket**: SSE streaming on all three client-facing protocols. Upstream Copilot Responses traffic selects WebSocket or HTTP from each model's advertised endpoints; streamed Responses traffic for the built-in `codex` provider uses WebSocket by default and uses HTTP when `useResponsesApiWebSocket` is disabled.
 - **Desktop App**: Electron GUI with GitHub Copilot sign-in, Codex OAuth, provider configuration, token usage, logs, and one-click start/stop.
 
 ## Compatibility
 
-Every client talks to the same local endpoint. The gateway routes each request to GitHub Copilot, the built-in `codex` provider, or a configured third-party provider, translating between protocols when the provider speaks a different one.
+Every client talks to the same local endpoint. In the default Copilot-only
+mode, the gateway routes model traffic only to GitHub Copilot and translates
+protocols locally when needed. Built-in Codex and third-party routes exist
+only for the explicit `copilotOnly: false` compatibility mode.
 
 **Client / Protocol Matrix**
 
@@ -69,7 +77,7 @@ Every client talks to the same local endpoint. The gateway routes each request t
 | OpenAI-compatible clients | ✅ Native | ✅ Native / Adapter | — | Chat Completions |
 | Anthropic-compatible clients | — | — | ✅ Native / Adapter | Anthropic Messages |
 
-**Providers and protocols.** Protocol support is model-specific. Chat Completions requires a native endpoint, while Responses and Messages can use supported adapters. The built-in `codex` provider uses Responses natively; third-party providers can use `anthropic`, `openai-compatible`, or `openai-responses`, with per-model overrides.
+**Providers and protocols.** Protocol support is model-specific. Chat Completions requires a native endpoint, while Responses and Messages can use supported adapters. Non-Copilot providers are rejected while `copilotOnly` is enabled.
 
 ## Desktop App
 
@@ -222,7 +230,7 @@ Why these fields matter:
 
 - `npm: "@ai-sdk/anthropic"` is the important part. OpenCode will speak Anthropic Messages semantics to this AI gateway instead of flattening everything into OpenAI Chat Completions.
 - `options.baseURL` should be `http://localhost:4141/v1`; the Anthropic SDK will append `/messages`, `/models`, and `/messages/count_tokens` automatically.
-- If you enable `auth.apiKeys` in this AI gateway, replace `dummy` with a real key. Otherwise any placeholder value is fine.
+- Replace `dummy` with a key from `auth.apiKeys`; protected routes reject every request when that list is empty.
 
 ## Using with Codex
 
@@ -243,7 +251,7 @@ web_search = "live"
 name = "OpenAI"
 base_url = "http://localhost:4141"
 env_key = "GITHUB_COPILOT_API_KEY"
-requires_openai_auth = true
+requires_openai_auth = false
 supports_websockets = false
 wire_api = "responses"
 request_max_retries = 3
@@ -262,9 +270,13 @@ enabled = false
 > [!NOTE]
 > `name` must be set to `"OpenAI"`.
 >
+> Keep `requires_openai_auth = false` in Copilot-only deployments. Setting it
+> to `true` allows Codex to use OpenAI/ChatGPT authentication independently of
+> this gateway.
+>
 > For third-party models that do not support `tool_search`, we recommend disabling features.apps. Otherwise, each prompt may consume an additional 20,000 or more tokens.
 
-### If Codex Is Not Signed In to a GPT Account
+### Alternative command-based gateway authentication
 
 ```toml
 [model_providers.copilot_api]
@@ -298,7 +310,8 @@ args = [
 ]
 ```
 
-Without this configuration, Codex cannot fetch `/v1/models` while not signed in to a GPT account, so custom models are unavailable in the model picker.
+This configuration authenticates Codex to the local gateway without a GPT
+account. It does not invoke OpenAI login.
 
 When a Codex client (`User-Agent` starts with `codex`) requests the top-level `GET /v1/models`, the gateway merges native Codex models with models available through the Messages adapter. The latter advertise `use_responses_lite: true`: `/v1/responses` uses **Responses → Messages** for Anthropic providers, while OpenAI-compatible providers and Chat-only Copilot models reuse the existing Messages route for **Responses → Messages → Chat Completions**, then translate streaming or JSON results back to Responses.
 
@@ -322,11 +335,56 @@ When Codex uses the top-level GitHub Copilot route with `approvals_reviewer = "a
 
 This mapping only applies to the top-level GitHub Copilot route. Provider-scoped routes do not use `modelMappings`, so the built-in `/codex` provider continues to handle `codex-auto-review` natively.
 
+### Codex V2 compaction and network boundary
+
+Codex CLI 0.149.0 enables `remote_compaction_v2` by default. For a manual or
+automatic compact, Codex sends its current history to the configured
+`base_url` and appends exactly one request-control item:
+
+```json
+{ "type": "compaction_trigger" }
+```
+
+With the configuration above, that request goes to this local gateway. The
+gateway detects the terminal trigger, forces HTTP, and forwards the request to
+the GitHub Copilot `/responses` endpoint. It does **not** call
+`api.openai.com`, `chatgpt.com`, or `auth.openai.com`. The
+`openai-intent: conversation-agent` header is only a Copilot protocol header;
+it does not change the destination host.
+
+Compaction is therefore not fully local: the conversation being compacted is
+processed by GitHub Copilot. GitHub may use OpenAI-operated model
+infrastructure behind the Copilot service, but the client and this gateway
+connect only to the configured GitHub Copilot endpoint. The response contains
+one opaque carrier:
+
+```json
+{
+  "type": "compaction",
+  "encrypted_content": "<opaque upstream value>"
+}
+```
+
+Neither Codex nor this gateway decrypts that value. Codex retains the carrier
+with a small amount of local history and sends it back through the same
+gateway on later turns. Gateway-added Responses `context_management` is a
+separate feature and is forcibly disabled for GPT-5.6 and newer, so it does
+not replace Codex V2's explicit trigger flow.
+
+The Responses-to-Messages fallback is different: it asks the selected model
+for a plaintext handoff summary and stores that summary as Base64 in an
+`encrypted_content` field. Base64 is encoding, **not encryption**. GPT-5.6 Sol
+uses native Copilot Responses and does not take this fallback when its model
+metadata advertises `/responses`.
+
 ---
 
 ## Project Overview
 
-A small AI gateway that can use GitHub Copilot, the built-in `codex` provider, or configured third-party providers such as DashScope. GitHub Copilot is optional: if no GitHub token is available, the server can still start in provider-only mode as long as at least one enabled provider is configured.
+A small AI gateway that exposes GitHub Copilot through OpenAI- and
+Anthropic-compatible local APIs. This hardened fork requires GitHub Copilot
+by default. Direct Codex and third-party upstreams remain available only after
+setting `copilotOnly` to `false`.
 
 The gateway exposes OpenAI- and Anthropic-compatible APIs from one local endpoint, so tools like [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview), OpenCode, Codex, and OpenAI-compatible clients can share the same local server.
 
@@ -343,7 +401,7 @@ On the GitHub Copilot path, the gateway prefers Copilot's native Anthropic-style
 >
 > 3. **OpenCode configuration:** When using with OpenCode, configure `~/.config/opencode/opencode.json` with `@ai-sdk/anthropic`. See [Using with OpenCode](#using-with-opencode).
 >
-> 4. **Built-in `copilot`, `codex` and third-party providers:** Run `npx @jeffreycao/copilot-api@latest auth` and choose `copilot`, `codex`, `deepseek`, `custom`, or other providers.
+> 4. **Network boundary:** Leave `copilotOnly: true`, use plain Copilot model IDs such as `gpt-5.6-sol`, and keep `requires_openai_auth = false` in Codex. Provider-prefixed models are unavailable in this mode.
 >
 > 5. **Note:** See [GitHub Copilot Security Notice](./NOTICE.md#github-copilot-security-notice) for the warning removed from the README header.
 
@@ -351,8 +409,8 @@ On the GitHub Copilot path, the gateway prefers Copilot's native Anthropic-style
 
 - Bun (>= 1.2.x)
 - Node.js if you plan to run the published CLI with `npx`
-- GitHub account with Copilot subscription only if you want to use the GitHub Copilot provider
-- An API key or OAuth login for at least one configured provider if you want to run without GitHub Copilot
+- GitHub account with a Copilot subscription
+- A generated local gateway API key in `auth.apiKeys`
 
 ## Installation
 
@@ -382,7 +440,10 @@ bun run start start
 
 ## Using with npx
 
-You can run the project directly using npx:
+The published `@jeffreycao/copilot-api` package is the upstream project and
+may not contain this fork's hardening. Use the source checkout or a locally
+built Docker image for a hardened deployment. The following commands describe
+the upstream package only:
 
 > [!IMPORTANT]
 > Token usage storage uses Node's built-in `node:sqlite` module when running with `npx`. It is enabled on Node.js >= 22.13.0. On Node.js < 22.13.0, the CLI still starts, but token usage storage is disabled.
@@ -405,11 +466,13 @@ For authentication or provider configuration only:
 npx @jeffreycao/copilot-api@latest auth
 ```
 
-To run without GitHub Copilot, configure at least one provider first, then start the server normally:
+Provider-only operation is intentionally disabled in this fork's default
+configuration. To opt in, first set `"copilotOnly": false` in `config.json`,
+then configure the provider:
 
 ```sh
-npx @jeffreycao/copilot-api@latest auth login --provider dashscope
-npx @jeffreycao/copilot-api@latest start
+bun run start auth login --provider dashscope
+bun run start start
 ```
 
 ## Using with Docker
@@ -420,24 +483,47 @@ Build the image:
 docker build -t copilot-api .
 ```
 
-Run the container with a bind mount so auth data survives restarts:
+Create protected state, authenticate, and run with loopback-only host
+publishing:
 
 ```sh
-mkdir -p ./copilot-data
-docker run -p 4141:4141 -v $(pwd)/copilot-data:/root/.local/share/copilot-api copilot-api
+install -d -m 700 ./copilot-data
+export GITHUB_COPILOT_API_KEY="$(openssl rand -hex 32)"
+printf '{"copilotOnly":true,"auth":{"apiKeys":["%s"]}}\n' \
+  "$GITHUB_COPILOT_API_KEY" > ./copilot-data/config.json
+chmod 600 ./copilot-data/config.json
+
+docker run --rm -it \
+  -v "$PWD/copilot-data:/home/bun/.local/share/copilot-api" \
+  copilot-api auth login --provider copilot
+
+docker run --rm \
+  -p 127.0.0.1:4141:4141 \
+  -v "$PWD/copilot-data:/home/bun/.local/share/copilot-api" \
+  copilot-api
 ```
 
-This stores GitHub auth data, provider config, and other gateway state in `./copilot-data` on the host, mapped to `/root/.local/share/copilot-api` in the container.
+This maps state to the unprivileged runtime user's
+`/home/bun/.local/share/copilot-api`. Do not publish the port as
+`-p 4141:4141` on an untrusted host.
 
-Or pass a GitHub token directly:
+For non-interactive startup, mount a GitHub token file read-only:
 
 ```sh
-docker run -p 4141:4141 -e GH_TOKEN=your_github_token_here copilot-api
+docker run --rm \
+  -p 127.0.0.1:4141:4141 \
+  -e GH_TOKEN_FILE=/run/secrets/github-token \
+  -v "$PWD/github-token:/run/secrets/github-token:ro" \
+  -v "$PWD/copilot-data:/home/bun/.local/share/copilot-api" \
+  copilot-api
 ```
+
+`GH_TOKEN` is rejected so the GitHub token is not passed as an environment
+variable or process argument.
 
 ## Electron Desktop App
 
-If you prefer a GUI, this repository also includes an Electron desktop app in `desktop/`. It supports GitHub Copilot sign-in, OpenAI Codex OAuth, and API-key configuration for Kimi, DeepSeek, DashScope, OpenRouter, or a custom provider. After authorization or provider configuration, it can start and stop the local proxy with one click and shows the local endpoint, auth header, available models, usage, and logs in the app.
+If you prefer a GUI, this repository also includes an Electron desktop app in `desktop/`. It supports GitHub Copilot sign-in and can start and stop the local proxy with one click. Codex OAuth and third-party provider configuration are inactive while the default `copilotOnly` guard is enabled.
 
 The settings screen also exposes `OAuth App`, `API Home`, `Enterprise URL`, verbose logging, and minimize-to-tray. Windows x64 (`.exe`), macOS Apple Silicon (`.dmg`), and Linux x64 (`.AppImage`) packages are published in GitHub Releases:
 
@@ -561,20 +647,20 @@ The plugin hooks into `session.created`, `session.deleted`, `chat.message`, and 
 
 After starting the server, a URL to the Copilot Usage Dashboard will be displayed in your console. This dashboard is a web interface for monitoring your API usage.
 
-1.  Start the server. For example, using npx:
+1.  Start the server:
     ```sh
-    npx @jeffreycao/copilot-api@latest start
+    bun run start start
     ```
 2.  The server will output a URL to the usage viewer. Copy and paste this URL into your browser. It will look something like this:
-    `http://localhost:4141/usage-viewer?endpoint=http://localhost:4141/usage`
+    `http://127.0.0.1:4141/usage-viewer`
     - If you use the `start.bat` script on Windows, this page will open automatically.
 
 The dashboard provides a user-friendly interface to view your Copilot usage data:
 
 > Token usage history requires Bun or Node.js >= 22.13.0. On Node.js < 22.13.0, the server runs normally but token usage storage is disabled.
 
-- **API Endpoint URL**: The dashboard is pre-configured to fetch data from your local server endpoint via a URL query parameter. You can manually switch this to any other compatible API endpoint.
-- **x-api-key Authentication**: If API Key authentication is enabled, you can provide the `x-api-key` request header. The key is persisted in the browser's local storage.
+- **API Endpoint URL**: The dashboard only accepts endpoints on the same origin as the viewer; it cannot send keys to another host.
+- **x-api-key Authentication**: Provide a required gateway key. It is stored only in `sessionStorage` and is cleared when the browser session ends.
 - **Period Selector**: Choose from Day, Week, or Month time ranges. The URL query parameter updates automatically when you switch, making it easy to bookmark and share.
 - **Fetch Data**: Click the "Refresh" button to load or refresh the usage data. The dashboard also fetches data automatically on page load.
 - **Copilot Quotas**: View quota usage for services such as Chat and Completions via progress bars. Hover over a card to see used/remaining details.
@@ -583,8 +669,7 @@ The dashboard provides a user-friendly interface to view your Copilot usage data
 - **Model Breakdown Table**: A per-model summary of requests, input/output/cache tokens, and estimated cost for the selected period.
 - **Request Events (Paginated)**: A time-sorted list of request event records with pagination support, showing timestamps, models, request IDs, and token counts.
 - **Detailed Information**: See the full JSON response from the API for a detailed breakdown of all available usage statistics.
-- **URL-based Configuration**: You can also specify the API endpoint and period directly via `endpoint` and `period` query parameters. For example:
-  `http://localhost:4141/usage-viewer?endpoint=http://your-api-server/usage&period=week`
+- **URL-based Configuration**: `endpoint` and `period` query parameters remain available, but `endpoint` must resolve to the viewer's own origin.
 
 ### Usage Viewer Screenshot
 
@@ -596,8 +681,8 @@ The dashboard provides a user-friendly interface to view your Copilot usage data
 
 Copilot API now uses a subcommand structure with these main commands:
 
-- `start`: Start the gateway server. If a GitHub token is available, the server starts with Copilot enabled. If no GitHub token is available, it starts in provider-only mode when at least one enabled provider exists; otherwise it guides you through provider setup.
-- `auth`: Run provider login or configuration without starting the server. Use it for GitHub Copilot login, Codex OAuth, or third-party provider API key setup.
+- `start`: Start the loopback-only gateway. In the default Copilot-only mode, missing GitHub credentials are a fatal error.
+- `auth`: Run GitHub Copilot login or manage gateway API keys. Direct-provider login is rejected while `copilotOnly` is enabled.
 - `debug`: Display diagnostic information including version, runtime details, file paths, and authentication status. Useful for troubleshooting and support.
 
 ## Command Line Options
@@ -620,7 +705,7 @@ The following command line options are available for the `start` command:
 | -------------- | ----------------------------------------------------------------------------- | ---------- | ----- |
 | --port         | Port to listen on                                                             | 4141       | -p    |
 | --verbose      | Enable verbose logging                                                        | false      | -v    |
-| --github-token | Provide GitHub token directly (must be generated using the `auth` subcommand) | none       | -g    |
+| --github-token-file | Read a GitHub token from a protected file | none | none |
 | --claude-code  | Generate a command to launch Claude Code with Copilot API config              | false      | -c    |
 | --show-token   | Show GitHub and Copilot tokens on fetch and refresh                           | false      | none  |
 | --proxy-env    | Initialize proxy from environment variables                                   | false      | none  |
@@ -633,13 +718,16 @@ The following command line options are available for the `start` command:
 | --verbose    | Enable verbose logging    | false   | -v    |
 | --show-token | Show GitHub token on auth | false   | none  |
 
-Use `copilot-api auth login --provider copilot` only when you want to enable the GitHub Copilot provider. Copilot is not required for `codex` or third-party provider-only usage.
+Use `copilot-api auth login --provider copilot` to configure the required
+GitHub credential. Login for `codex` and third-party providers is rejected by
+default; set `copilotOnly: false` first only when that direct egress is
+intentional.
 
-Use `copilot-api auth login --provider deepseek`, `--provider dashscope`, `--provider openrouter`, `--provider opencode-go`, or `--provider kimi` to add or update those common third-party providers from the CLI. DeepSeek prompts for masked `apiKey`, provider `type` (default `anthropic`), and `baseUrl` defaulting to `https://api.deepseek.com/anthropic`. DashScope prompts for masked `apiKey`, provider `type` (default `openai-compatible`), and prefilled `baseUrl`. OpenRouter prompts for masked `apiKey` and prefilled `baseUrl` only, and writes `type: "anthropic"`. OpenCode Go prompts for masked `apiKey` and prefilled `baseUrl` only, and writes `type: "openai-compatible"` (baseUrl `https://opencode.ai/zen/go`). Kimi prompts for masked `apiKey` and prefilled `baseUrl` only, and writes `type: "openai-compatible"` (baseUrl `https://api.kimi.com/coding`). OpenCode Go additionally routes built-in `qwen*` and `minimax*` models through Anthropic Messages and `gpt*`/`grok*` models through OpenAI Responses; other models keep the OpenAI-compatible default. After a provider is configured and enabled, `copilot-api start` can run without any GitHub token.
+After explicitly setting `copilotOnly: false`, use `copilot-api auth login --provider deepseek`, `--provider dashscope`, `--provider openrouter`, `--provider opencode-go`, or `--provider kimi` to add or update those common third-party providers from the CLI. DeepSeek prompts for masked `apiKey`, provider `type` (default `anthropic`), and `baseUrl` defaulting to `https://api.deepseek.com/anthropic`. DashScope prompts for masked `apiKey`, provider `type` (default `openai-compatible`), and prefilled `baseUrl`. OpenRouter prompts for masked `apiKey` and prefilled `baseUrl` only, and writes `type: "anthropic"`. OpenCode Go prompts for masked `apiKey` and prefilled `baseUrl` only, and writes `type: "openai-compatible"` (baseUrl `https://opencode.ai/zen/go`). Kimi prompts for masked `apiKey` and prefilled `baseUrl` only, and writes `type: "openai-compatible"` (baseUrl `https://api.kimi.com/coding`). OpenCode Go additionally routes built-in `qwen*` and `minimax*` models through Anthropic Messages and `gpt*`/`grok*` models through OpenAI Responses; other models keep the OpenAI-compatible default.
 
-Use `copilot-api auth login --provider custom` to add or update another third-party provider from the CLI. The command prompts for the provider name, supported type (`anthropic`, `openai-compatible`, or `openai-responses`), `baseUrl`, masked `apiKey`, and `authType`; `authType` may be left as the type default or set to `x-api-key` / `authorization`.
+Use `copilot-api auth login --provider custom` to add or update another third-party provider only after disabling `copilotOnly`. The command prompts for the provider name, supported type (`anthropic`, `openai-compatible`, or `openai-responses`), `baseUrl`, masked `apiKey`, and `authType`; `authType` may be left as the type default or set to `x-api-key` / `authorization`.
 
-Gateway API keys live under `auth.apiKeys` in `config.json`. Manage them with `copilot-api auth keys` (one operation per invocation): add a key with `--add <key>`, remove one with `--remove <key>`, list all with `--list`, or clear them all with `--clear`. Clients authenticate with any configured key via `x-api-key` or `Authorization: Bearer`. When no keys are configured, `copilot-api start` starts with authentication bypassed and prints a startup info message.
+Gateway API keys live under `auth.apiKeys` in `config.json`. Manage them with `copilot-api auth keys` (one operation per invocation): add a key with `--add <key>`, remove one with `--remove <key>`, list all with `--list`, or clear them all with `--clear`. Clients authenticate with any configured key via `x-api-key` or `Authorization: Bearer`. When no keys are configured, protected routes reject requests; there is no authentication bypass.
 
 ### Debug Command Options
 
@@ -685,16 +773,18 @@ Gateway API keys live under `auth.apiKeys` in `config.json`. Manage them with `c
       "websocketMaxBufferedMessages": 1024
     },
     "useResponsesApiWebSearch": true,
-    "alphaSearchCodexPriority": true,
+    "alphaSearchCodexPriority": false,
     "alphaSearchModel": "gpt-5-mini",
+    "copilotOnly": true,
     "messageApiWebSearchModel": "gpt-5-mini"
   }
   ```
-- **auth.apiKeys:** API keys used for request authentication on non-admin routes. Supports multiple keys for rotation. Requests can authenticate with either `x-api-key: <key>` or `Authorization: Bearer <key>`. If empty or omitted, authentication for non-admin routes is disabled.
+- **copilotOnly:** Defaults to `true`. Rejects all configured external providers, the built-in Codex/ChatGPT backend, direct Anthropic token counting, direct-provider auth login, and Codex-priority alpha search. Set it to `false` only to opt into those network destinations.
+- **auth.apiKeys:** Required API keys for non-admin routes. Supports multiple keys for rotation. Requests can authenticate with either `x-api-key: <key>` or `Authorization: Bearer <key>`. If empty or omitted, protected routes fail closed.
 - **auth.adminApiKey:** Single admin key used only for `/admin/*` routes. If missing, the server generates a random key at startup and writes it back to `config.json`. Requests use the same `x-api-key` or `Authorization: Bearer` headers, but regular `auth.apiKeys` never grant access to `/admin/*`.
 - **modelMappings:** Exact `sourceModel -> targetModel` rewrites shared by top-level `POST /v1/messages`, `POST /v1/messages/count_tokens`, `POST /v1/responses`, and `POST /v1/chat/completions` requests. Omit it or leave it as `{}` to disable rewrites. Both the source and target must be non-empty strings. Targets can be regular model IDs or `provider/model` aliases such as `dashscope/qwen3.6-plus`, and the rewrite happens before provider alias parsing. These mappings are not split per interface. The admin endpoints `GET/POST /admin/config/model-mappings` read and update only this field.
 - **extraPrompts:** Map of `model -> prompt` appended to the first system prompt when translating Anthropic-style requests to Responses API. Use this to inject guardrails or guidance per model. Missing default entries are auto-added without overwriting your custom prompts. For GPT-5.3+ models (e.g. `gpt-5.3-codex`, `gpt-5.4`, `gpt-5.5`), a built-in commentary prompt is used as fallback when not explicitly configured. The built-in prompts enable phase-aware commentary, which lets the model emit a short user-facing progress update before tools or deeper reasoning.
-- **providers:** Global upstream provider map. Each provider key (for example `dashscope`) becomes a route prefix (`/dashscope/v1/messages`). Supports `type: "anthropic"`, `type: "openai-compatible"`, and `type: "openai-responses"`. Top-level clients can also use `model: "dashscope/model-id"` with `/v1/messages`, `/v1/messages/count_tokens`, `/v1/responses`, and `/v1/chat/completions`; the gateway strips the `dashscope/` prefix before forwarding upstream. The `/v1/responses` route for `anthropic` and `openai-compatible` providers uses the Responses Lite → Messages adapter; `openai-compatible` providers then reuse the Messages → Chat translation. Codex clients (`User-Agent` starting with `codex`) also use the adapter for non-`gpt-*` models on `openai-responses` providers. `GET /v1/models` aggregates enabled provider models with `provider/model-id` IDs, while the top-level Codex-UA catalog also merges these adaptable models as `use_responses_lite` entries. Use `GET /dashscope/v1/models` for a single provider's raw model list.
+- **providers:** Global upstream provider map, ignored while `copilotOnly` is enabled. In explicit multi-provider mode, each provider key (for example `dashscope`) becomes a route prefix (`/dashscope/v1/messages`). Supports `type: "anthropic"`, `type: "openai-compatible"`, and `type: "openai-responses"`. Top-level clients can also use `model: "dashscope/model-id"` with `/v1/messages`, `/v1/messages/count_tokens`, `/v1/responses`, and `/v1/chat/completions`; the gateway strips the `dashscope/` prefix before forwarding upstream. The `/v1/responses` route for `anthropic` and `openai-compatible` providers uses the Responses Lite → Messages adapter; `openai-compatible` providers then reuse the Messages → Chat translation. Codex clients (`User-Agent` starting with `codex`) also use the adapter for non-`gpt-*` models on `openai-responses` providers. `GET /v1/models` aggregates enabled provider models with `provider/model-id` IDs, while the top-level Codex-UA catalog also merges these adaptable models as `use_responses_lite` entries. Use `GET /dashscope/v1/models` for a single provider's raw model list.
   - `enabled` defaults to `true` if omitted.
   - `baseUrl` should be provider API base URL without the final endpoint. For Anthropic providers, omit `/v1/messages`; for OpenAI-compatible providers, omit `/v1/chat/completions`; for OpenAI Responses providers, omit `/v1/responses`.
   - `apiKey` is used as the upstream credential value and is required for regular providers.
@@ -726,42 +816,45 @@ Gateway API keys live under `auth.apiKeys` in `config.json`. Manage them with `c
 - **useResponsesApiWebSocket:** When `true`, Copilot Responses requests use WebSocket for models that advertise `ws:/responses`; models that advertise only `/responses` use HTTP. Streamed Responses requests for the built-in `codex` provider use WebSocket whenever this setting is enabled, while non-streaming Codex requests always use HTTP. Set this to `false` to make Copilot use HTTP `/responses` where the selected model advertises it and to send streamed Codex Responses requests over HTTP. WebSocket failures are not retried automatically over HTTP. Defaults to `true`. If a proxy, VPN, or network blocks or destabilizes WebSocket traffic, disable this setting or switch networks.
 - **responsesTransport:** Positive integer lifecycle and buffering limits for every upstream Responses transport. Invalid, zero, or negative values fall back to the defaults shown above. `headersTimeoutMsV2` covers connection setup through receipt of HTTP response headers; it is not a total generation deadline. `streamInactivityTimeoutMs` is reset by every HTTP body chunk or WebSocket message, allowing long generations to continue while they remain active. `websocketOpenTimeoutMs` limits the WebSocket handshake, while `websocketPoolIdleTimeoutMs` controls only completed, reusable pooled sockets. The byte and message limits bound queued WebSocket events; exceeding either limit fails that stream and invalidates its socket rather than dropping or reordering events.
 - **useResponsesApiWebSearch:** When `true`, the server keeps Responses API tools with `type: "web_search"` and forwards them upstream. Set to `false` to strip those tools from `/responses` payloads. Defaults to `true`.
-- **alphaSearchCodexPriority:** Defaults to `true`. Top-level alpha-search requests prefer the Codex alpha-search endpoint because it does not consume provider quota. If Codex is unavailable, or this setting is `false`, requests with a `provider/model` alias other than `codex/model` use that provider's `/v1/responses` endpoint, and requests without a provider prefix use GitHub Copilot Responses web search. The adapter recognizes every current Codex search command; unsupported `image_query` and `screenshot` operations return successful no-retry tool output.
+- **alphaSearchCodexPriority:** Defaults to `false` and is forced off while `copilotOnly` is enabled. Top-level alpha-search then uses GitHub Copilot Responses web search instead of the direct ChatGPT Codex backend.
 - **alphaSearchModel:** Native Responses search model used when a Messages-backed Responses Lite model cannot run Responses web search directly. Defaults to `gpt-5-mini`; it may be a regular Copilot model or an `openai-responses` `provider/model` alias. Set it to an empty string to disable this redirect, in which case alpha-search requests for those models return an invalid-request error.
 - **messageApiWebSearchModel:** Global fallback model used when a top-level Copilot `/v1/messages` request contains only the server-side `web_search` tool. Defaults to `gpt-5-mini`. If the value is a `provider/model` alias, the request is routed into that provider's Messages API path with the provider prefix stripped. For Copilot GPT models, web search runs through `/responses`. Mixed `web_search` plus custom tools are not supported and the server-side `web_search` tool is stripped.
 - **claudeAutoModel:** Model used for Claude Code background security-monitor requests on `/v1/messages` and provider message routes. A request is treated as a security-monitor request when it carries no tools, sets `stop_sequences` to `["</block>"]`, and contains a system text block starting with `You are a security monitor for autonomous AI coding agents.`; its model is then replaced with this value. For top-level requests, a `provider/model` alias is forwarded into that provider's Messages API; provider routes keep their current provider and use this configured value directly. Defaults to empty (disabled).
 - **claudeTokenMultiplier:** Multiplier applied to the fallback GPT-tokenizer estimate for Claude `/v1/messages/count_tokens` requests. Defaults to `1.15`. Increase it if your client is still compacting too late. This setting is only used when the proxy is estimating Claude tokens locally; if `anthropicApiKey` is configured and Anthropic token counting succeeds, the exact Anthropic count is returned instead.
-- **anthropicApiKey:** Anthropic API key used to forward Claude `/v1/messages/count_tokens` requests to Anthropic's real token counting endpoint, which returns exact counts instead of GPT tokenizer estimates. Can also be set via the `ANTHROPIC_API_KEY` environment variable. If not set, or if the upstream call fails, token counting falls back to local GPT tokenizer estimation controlled by `claudeTokenMultiplier`.
+- **anthropicApiKey:** Ignored while `copilotOnly` is enabled, as is `ANTHROPIC_API_KEY`; token counting stays local. Outside Copilot-only mode, this key forwards the full count-tokens payload directly to Anthropic.
 
 Edit this file to customize prompts or swap in your own fast model. Restart the server (or rerun the command) after changes so the cached config is refreshed.
 
 ## API Authentication
 
-- **Protected non-admin routes:** All routes except `/`, `/usage-viewer`, and `/usage-viewer/` require authentication when `auth.apiKeys` is configured and non-empty.
+- **Protected non-admin routes:** All routes except `/`, `/usage-viewer`, and `/usage-viewer/` require a key from `auth.apiKeys`.
 - **Admin routes:** All `/admin/*` routes require `auth.adminApiKey`. If it is missing, the server generates one at startup and persists it to `config.json` before serving requests.
 - **Allowed auth headers:**
   - `x-api-key: <your_key>`
   - `Authorization: Bearer <your_key>`
-- **CORS preflight:** `OPTIONS` requests are always allowed.
-- **When no regular keys are configured:** Non-admin routes continue to allow requests. This does not apply to `/admin/*`, which only accepts `auth.adminApiKey`.
+- **CORS:** The server does not emit wildcard CORS headers.
+- **When no regular keys are configured:** Protected routes reject requests. This does not affect `/admin/*`, which only accepts `auth.adminApiKey`.
 
 Example request for a regular protected route:
 
 ```sh
-curl http://localhost:4141/v1/models \
+curl http://127.0.0.1:4141/v1/models \
   -H "x-api-key: your_api_key"
 ```
 
 Example request for an admin route:
 
 ```sh
-curl http://localhost:4141/admin/config/model-mappings \
+curl http://127.0.0.1:4141/admin/config/model-mappings \
   -H "x-api-key: your_admin_api_key"
 ```
 
 ## API Endpoints
 
-The server exposes several OpenAI- and Anthropic-compatible endpoints. Requests can target GitHub Copilot, the built-in `codex` provider, or configured providers depending on the selected model and `provider/model` alias. Every `/v1/...` endpoint below also supports a provider-scoped path in the form `/:provider/v1/...`; those variants are omitted from the tables.
+The server exposes several OpenAI- and Anthropic-compatible endpoints. With
+the default `copilotOnly: true`, requests target GitHub Copilot only.
+Provider-scoped paths and `provider/model` aliases are rejected unless the
+guard is explicitly disabled.
 
 ### OpenAI Compatible Endpoints
 
@@ -771,12 +864,14 @@ These endpoints mimic the OpenAI API structure.
 | --------------------------- | ------ | ---------------------------------------------------------------- |
 | `POST /v1/responses`        | `POST` | OpenAI Most advanced interface for generating model responses. Supports `provider/model` aliases for `openai-responses` providers. |
 | `POST /v1/chat/completions` | `POST` | Creates a model response for the given chat conversation. Supports `provider/model` aliases for `openai-compatible` providers and can be used without Copilot when the target provider is configured. |
-| `GET /v1/models`            | `GET`  | Lists Copilot models plus enabled provider models using `provider/model-id` IDs. Requests from Codex clients (`User-Agent` beginning with `codex`) are forwarded to the Codex Models upstream. |
+| `GET /v1/models`            | `GET`  | Lists Copilot models. Codex clients (`User-Agent` beginning with `codex`) receive a merged Codex-compatible catalog; external provider models are included only when `copilotOnly` is disabled. |
 | `POST /v1/embeddings`       | `POST` | Creates an embedding vector representing the input text.         |
 
 ### Codex Backend Endpoints
 
-These endpoints implement Codex backend APIs. Top-level image requests require an active Codex login; alpha search can use either the Codex backend or a Responses web-search adapter.
+These endpoints implement Codex backend APIs and are unavailable while
+`copilotOnly` is enabled. Copilot-backed Responses web search remains
+available.
 
 | Endpoint                                                       | Method | Description                                                     |
 | -------------------------------------------------------------- | ------ | --------------------------------------------------------------- |
@@ -826,9 +921,9 @@ npx @jeffreycao/copilot-api@latest start --port 8080 --verbose
 # Run the auth flow
 npx @jeffreycao/copilot-api@latest auth login
 
-# Configure a third-party provider, then run without GitHub Copilot
-npx @jeffreycao/copilot-api@latest auth login --provider dashscope
-npx @jeffreycao/copilot-api@latest start
+# Optional direct-provider mode: first set copilotOnly=false in config.json
+bun run start auth login --provider dashscope
+bun run start start
 
 # Print debug information as JSON
 npx @jeffreycao/copilot-api@latest debug --json
@@ -837,15 +932,18 @@ npx @jeffreycao/copilot-api@latest debug --json
 bunx --bun @jeffreycao/copilot-api@latest start
 ```
 
-OpenAI-compatible provider examples after configuring `dashscope`:
+OpenAI-compatible provider examples after explicitly disabling `copilotOnly`
+and configuring `dashscope`:
 
 ```sh
 curl http://localhost:4141/v1/chat/completions \
   -H "content-type: application/json" \
+  -H "x-api-key: $GITHUB_COPILOT_API_KEY" \
   -d '{"model":"dashscope/qwen3.6-plus","messages":[{"role":"user","content":"hello"}]}'
 
 curl http://localhost:4141/dashscope/v1/messages \
   -H "content-type: application/json" \
+  -H "x-api-key: $GITHUB_COPILOT_API_KEY" \
   -d '{"model":"qwen3.6-plus","max_tokens":1024,"messages":[{"role":"user","content":"hello"}]}'
 ```
 

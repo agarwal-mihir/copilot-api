@@ -22,7 +22,6 @@ function createApp() {
     createAuthMiddleware({
       getApiKeys: () => adminApiKeys,
       allowUnauthenticatedPaths: [],
-      allowWhenNoApiKeys: false,
     }),
   )
 
@@ -86,13 +85,12 @@ describe("request auth middleware", () => {
     expect(response.status).toBe(401)
   })
 
-  test("allows non-admin routes when no regular api keys are configured", async () => {
+  test("rejects non-admin routes when no regular api keys are configured", async () => {
     regularApiKeys = []
     const app = createApp()
     const response = await app.request("/models")
 
-    expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ ok: true, scope: "default" })
+    expect(response.status).toBe(401)
   })
 
   test("rejects admin routes when no admin api key is configured", async () => {

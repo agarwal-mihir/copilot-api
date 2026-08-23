@@ -1,6 +1,7 @@
 import {
   getRawProviderConfig,
   getProviderConfig,
+  isCopilotOnlyMode,
   type ResolvedProviderConfig,
 } from "~/lib/config"
 import {
@@ -21,6 +22,10 @@ function isMissingCodexCredentialsError(error: unknown): boolean {
 export async function resolveProviderConfig(
   providerName: string,
 ): Promise<ResolvedProviderConfig | null> {
+  if (isCopilotOnlyMode()) {
+    return null
+  }
+
   const normalizedProviderName = providerName.trim()
   if (!normalizedProviderName) {
     return null

@@ -5,17 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Copilot API Usage Dashboard</title>
 
-    <script src="https://cdn.tailwindcss.com"></script>
-
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
-
-    <script src="https://unpkg.com/lucide@0.378.0/dist/umd/lucide.min.js"></script>
-
     <style>
       :root {
         --color-red: #dc2626;
@@ -55,10 +44,33 @@
         box-sizing: border-box;
       }
 
+      body,
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
       body {
-        font-family: "Inter", sans-serif;
+        font-family:
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
         background-color: #eef2f7;
         color: var(--color-fg-light);
+      }
+
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
       }
 
       .app-shell {
@@ -346,6 +358,429 @@
         gap: 10px;
       }
 
+      /* ponytail: local utility subset avoids executing third-party scripts in a credential-bearing page. */
+      .antialiased {
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
+      .block {
+        display: block;
+      }
+
+      .flex {
+        display: flex;
+      }
+
+      .inline-flex {
+        display: inline-flex;
+      }
+
+      .grid {
+        display: grid;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .flex-col {
+        flex-direction: column;
+      }
+
+      .flex-wrap {
+        flex-wrap: wrap;
+      }
+
+      .items-start {
+        align-items: flex-start;
+      }
+
+      .items-center {
+        align-items: center;
+      }
+
+      .items-end {
+        align-items: flex-end;
+      }
+
+      .justify-center {
+        justify-content: center;
+      }
+
+      .justify-between {
+        justify-content: space-between;
+      }
+
+      .grid-cols-1 {
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+      }
+
+      .gap-1\.5 {
+        gap: 0.375rem;
+      }
+
+      .gap-2 {
+        gap: 0.5rem;
+      }
+
+      .gap-3 {
+        gap: 0.75rem;
+      }
+
+      .gap-4 {
+        gap: 1rem;
+      }
+
+      .gap-5 {
+        gap: 1.25rem;
+      }
+
+      .h-2,
+      .w-2 {
+        width: 0.5rem;
+        height: 0.5rem;
+      }
+
+      .h-4,
+      .w-4 {
+        width: 1rem;
+        height: 1rem;
+      }
+
+      .h-5,
+      .w-5 {
+        width: 1.25rem;
+        height: 1.25rem;
+      }
+
+      .h-10,
+      .w-10 {
+        width: 2.5rem;
+        height: 2.5rem;
+      }
+
+      .h-12,
+      .w-12 {
+        width: 3rem;
+        height: 3rem;
+      }
+
+      .h-56 {
+        height: 14rem;
+      }
+
+      .w-full {
+        width: 100%;
+      }
+
+      [class~="max-w-[100px]"] {
+        max-width: 100px;
+      }
+
+      [class~="max-w-[140px]"] {
+        max-width: 140px;
+      }
+
+      [class~="max-w-[170px]"] {
+        max-width: 170px;
+      }
+
+      [class~="max-w-[180px]"] {
+        max-width: 180px;
+      }
+
+      [class~="max-w-[200px]"] {
+        max-width: 200px;
+      }
+
+      [class~="max-w-[280px]"] {
+        max-width: 280px;
+      }
+
+      [class~="min-h-[14rem]"] {
+        min-height: 14rem;
+      }
+
+      [class~="min-w-[860px]"] {
+        min-width: 860px;
+      }
+
+      [class~="min-w-[1000px]"] {
+        min-width: 1000px;
+      }
+
+      .m-0,
+      .mb-0 {
+        margin-bottom: 0;
+      }
+
+      .mb-1 {
+        margin-bottom: 0.25rem;
+      }
+
+      .mb-2 {
+        margin-bottom: 0.5rem;
+      }
+
+      .mr-3 {
+        margin-right: 0.75rem;
+      }
+
+      .mt-0\.5 {
+        margin-top: 0.125rem;
+      }
+
+      .mt-1 {
+        margin-top: 0.25rem;
+      }
+
+      .mt-2 {
+        margin-top: 0.5rem;
+      }
+
+      .mt-3 {
+        margin-top: 0.75rem;
+      }
+
+      .mt-5 {
+        margin-top: 1.25rem;
+      }
+
+      .mx-auto {
+        margin-left: auto;
+        margin-right: auto;
+      }
+
+      .p-3 {
+        padding: 0.75rem;
+      }
+
+      .p-4 {
+        padding: 1rem;
+      }
+
+      .px-2 {
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+      }
+
+      .px-2\.5 {
+        padding-left: 0.625rem;
+        padding-right: 0.625rem;
+      }
+
+      .px-3 {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+      }
+
+      .px-4 {
+        padding-left: 1rem;
+        padding-right: 1rem;
+      }
+
+      .py-1 {
+        padding-bottom: 0.25rem;
+        padding-top: 0.25rem;
+      }
+
+      .py-1\.5 {
+        padding-bottom: 0.375rem;
+        padding-top: 0.375rem;
+      }
+
+      .py-2 {
+        padding-bottom: 0.5rem;
+        padding-top: 0.5rem;
+      }
+
+      .py-8 {
+        padding-bottom: 2rem;
+        padding-top: 2rem;
+      }
+
+      .py-16 {
+        padding-bottom: 4rem;
+        padding-top: 4rem;
+      }
+
+      .py-20 {
+        padding-bottom: 5rem;
+        padding-top: 5rem;
+      }
+
+      .pl-4 {
+        padding-left: 1rem;
+      }
+
+      .border {
+        border-style: solid;
+        border-width: 1px;
+      }
+
+      .border-4 {
+        border-style: solid;
+        border-width: 4px;
+      }
+
+      .border-b {
+        border-bottom-style: solid;
+        border-bottom-width: 1px;
+      }
+
+      .border-t-4 {
+        border-top-style: solid;
+        border-top-width: 4px;
+      }
+
+      .border-transparent {
+        border-color: transparent;
+      }
+
+      .last\:border-b-0:last-child {
+        border-bottom-width: 0;
+      }
+
+      .rounded-full {
+        border-radius: 9999px;
+      }
+
+      .rounded-lg {
+        border-radius: 0.5rem;
+      }
+
+      .rounded-md {
+        border-radius: 0.375rem;
+      }
+
+      .overflow-auto {
+        overflow: auto;
+      }
+
+      .relative {
+        position: relative;
+      }
+
+      .capitalize {
+        text-transform: capitalize;
+      }
+
+      .font-bold {
+        font-weight: 700;
+      }
+
+      .font-medium {
+        font-weight: 500;
+      }
+
+      .font-semibold {
+        font-weight: 600;
+      }
+
+      .font-mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      .leading-5 {
+        line-height: 1.25rem;
+      }
+
+      .text-center {
+        text-align: center;
+      }
+
+      .text-left {
+        text-align: left;
+      }
+
+      .text-right {
+        text-align: right;
+      }
+
+      .text-xs {
+        font-size: 0.75rem;
+        line-height: 1rem;
+      }
+
+      .text-sm {
+        font-size: 0.875rem;
+        line-height: 1.25rem;
+      }
+
+      .text-lg {
+        font-size: 1.125rem;
+        line-height: 1.75rem;
+      }
+
+      .truncate {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .whitespace-nowrap {
+        white-space: nowrap;
+      }
+
+      .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+        margin-top: 1rem;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @keyframes pulse {
+        50% {
+          opacity: 0.5;
+        }
+      }
+
+      .animate-spin {
+        animation: spin 1s linear infinite;
+      }
+
+      .animate-pulse {
+        animation: pulse 2s ease-in-out infinite;
+      }
+
+      [data-lucide] {
+        display: inline-flex;
+        flex: none;
+        align-items: center;
+        justify-content: center;
+        font-style: normal;
+        font-weight: 700;
+      }
+
+      [data-lucide="refresh-cw"]::before {
+        content: "R";
+      }
+
+      [data-lucide="gauge"]::before {
+        content: "Q";
+      }
+
+      [data-lucide="file-text"]::before {
+        content: "#";
+      }
+
+      [data-lucide="database"]::before {
+        content: "DB";
+        font-size: 0.65em;
+      }
+
+      [data-lucide="alert-triangle"]::before {
+        content: "!";
+      }
+
+      [data-lucide="info"]::before {
+        content: "i";
+      }
+
       @media (max-width: 1280px) {
         .metric-grid-tight {
           grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -383,6 +818,30 @@
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
+
+      @media (min-width: 640px) {
+        .sm\:flex-row {
+          flex-direction: row;
+        }
+
+        .sm\:items-center {
+          align-items: center;
+        }
+
+        .sm\:items-start {
+          align-items: flex-start;
+        }
+
+        .sm\:justify-between {
+          justify-content: space-between;
+        }
+      }
+
+      @media (min-width: 1280px) {
+        [class~="xl:grid-cols-[minmax(0,1fr)_304px]"] {
+          grid-template-columns: minmax(0, 1fr) 304px;
+        }
+      }
     </style>
   </head>
   <body class="antialiased">
@@ -403,7 +862,7 @@
                 type="text"
                 id="endpoint-url"
                 class="input-control input-focus"
-                placeholder="http://localhost:4141/usage"
+                placeholder="/usage"
               />
             </div>
             <div>
@@ -459,7 +918,7 @@
           fetchButton.style.backgroundColor = "var(--color-blue)";
         });
 
-        const DEFAULT_ENDPOINT = "http://localhost:4141/usage";
+        const DEFAULT_ENDPOINT = "/usage";
         const DEFAULT_TOKEN_USAGE_PERIOD = "day";
         const DEFAULT_TOKEN_USAGE_EVENTS_PAGE_SIZE = 20;
         const ALL_METRICS_VALUE = "__all__";
@@ -498,13 +957,10 @@
 
         // --- Rendering Logic ---
 
-        /**
-         * Safely calls lucide.createIcons() if the library is available.
-         */
         function createIcons() {
-          if (typeof lucide !== "undefined") {
-            lucide.createIcons();
-          }
+          document.querySelectorAll("[data-lucide]").forEach((icon) => {
+            icon.setAttribute("aria-hidden", "true");
+          });
         }
 
         function escapeHtml(value) {
@@ -547,9 +1003,21 @@
 
         function loadStoredApiKey() {
           try {
-            return localStorage.getItem(API_KEY_STORAGE_KEY) || "";
+            localStorage.removeItem(API_KEY_STORAGE_KEY);
           } catch (error) {
-            console.warn("Could not read stored API key:", getErrorMessage(error));
+            console.warn(
+              "Could not remove legacy stored API key:",
+              getErrorMessage(error)
+            );
+          }
+
+          try {
+            return sessionStorage.getItem(API_KEY_STORAGE_KEY) || "";
+          } catch (error) {
+            console.warn(
+              "Could not read session API key:",
+              getErrorMessage(error)
+            );
             return "";
           }
         }
@@ -558,12 +1026,15 @@
           try {
             const trimmed = value.trim();
             if (trimmed) {
-              localStorage.setItem(API_KEY_STORAGE_KEY, trimmed);
+              sessionStorage.setItem(API_KEY_STORAGE_KEY, trimmed);
             } else {
-              localStorage.removeItem(API_KEY_STORAGE_KEY);
+              sessionStorage.removeItem(API_KEY_STORAGE_KEY);
             }
           } catch (error) {
-            console.warn("Could not store API key:", getErrorMessage(error));
+            console.warn(
+              "Could not store session API key:",
+              getErrorMessage(error)
+            );
           }
         }
 
@@ -577,7 +1048,11 @@
         }
 
         function resolveUsageUrl(endpoint) {
-          return new URL(endpoint, window.location.href).toString();
+          const url = new URL(endpoint, window.location.href);
+          if (url.origin !== window.location.origin) {
+            throw new Error("Usage endpoint must use this server origin.");
+          }
+          return url.toString();
         }
 
         function deriveEndpointUrl(usageEndpoint, targetPath) {

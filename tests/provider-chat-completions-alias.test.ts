@@ -14,6 +14,7 @@ const noopTokenUsageRecorder = () => {}
 await mock.module("~/lib/config", () => ({
   ...actualConfigModule,
   getProviderConfig: () => providerConfig,
+  isCopilotOnlyMode: () => false,
   resolveMappedModel: (model: string) => modelMappings[model] ?? model,
 }))
 

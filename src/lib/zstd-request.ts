@@ -1,37 +1,68 @@
 import type { MiddlewareHandler } from "hono"
 
-import { decompress as decompressFallback } from "fzstd"
-
-type BinaryData = ArrayBuffer | ArrayBufferView
-
-type BunRuntime = {
-  zstdDecompress?: (input: Uint8Array) => BinaryData | Promise<BinaryData>
-}
-
 type NodeZlibModule = {
   zstdDecompress?: (
     input: Uint8Array,
+    options: {
+      maxOutputLength: number
+    },
     callback: (error: Error | null, result: Uint8Array) => void,
   ) => void
 }
 
 const ZSTD_CONTENT_ENCODING = "zstd"
 const INVALID_BODY_STATUS = 400
+const BODY_TOO_LARGE_STATUS = 413
+
+export const MAX_REQUEST_BODY_BYTES = 64 * 1024 * 1024
 
 let nodeZlibPromise: Promise<NodeZlibModule | null> | null = null
 
-export const zstdDecompressionMiddleware: MiddlewareHandler = async (
-  c,
-  next,
-) => {
-  const contentEncoding = c.req.header("content-encoding")?.trim().toLowerCase()
-  if (contentEncoding !== ZSTD_CONTENT_ENCODING) {
-    return next()
-  }
+class DecompressedBodyTooLargeError extends Error {}
 
-  try {
-    const compressedBody = new Uint8Array(await c.req.raw.arrayBuffer())
-    const decompressedBody = await decompressZstd(compressedBody)
+export function createZstdDecompressionMiddleware(
+  maxDecompressedBytes = MAX_REQUEST_BODY_BYTES,
+): MiddlewareHandler {
+  return async (c, next) => {
+    const contentEncoding = c.req
+      .header("content-encoding")
+      ?.trim()
+      .toLowerCase()
+    if (contentEncoding !== ZSTD_CONTENT_ENCODING) {
+      return next()
+    }
+
+    let decompressedBody: Uint8Array
+    try {
+      const compressedBody = new Uint8Array(await c.req.raw.arrayBuffer())
+      decompressedBody = await decompressZstd(
+        compressedBody,
+        maxDecompressedBytes,
+      )
+    } catch (error) {
+      if (error instanceof DecompressedBodyTooLargeError) {
+        return c.json(
+          {
+            error: {
+              message: "Decompressed request body is too large.",
+              type: "request_too_large",
+            },
+          },
+          BODY_TOO_LARGE_STATUS,
+        )
+      }
+
+      return c.json(
+        {
+          error: {
+            message: "Failed to decompress zstd request body.",
+            type: "invalid_request_error",
+          },
+        },
+        INVALID_BODY_STATUS,
+      )
+    }
+
     const headers = new Headers(c.req.raw.headers)
     headers.delete("content-encoding")
     headers.delete("content-length")
@@ -43,46 +74,44 @@ export const zstdDecompressionMiddleware: MiddlewareHandler = async (
       signal: c.req.raw.signal,
     })
     c.req.bodyCache = {}
-  } catch {
-    return c.json(
-      {
-        error: {
-          message: "Failed to decompress zstd request body.",
-          type: "invalid_request_error",
-        },
-      },
-      INVALID_BODY_STATUS,
-    )
-  }
 
-  return next()
+    return next()
+  }
 }
 
-const decompressZstd = async (input: Uint8Array): Promise<Uint8Array> => {
-  const bun = getBunRuntime()
-  if (bun?.zstdDecompress) {
-    return toUint8Array(await bun.zstdDecompress(input))
+export const zstdDecompressionMiddleware = createZstdDecompressionMiddleware()
+
+const decompressZstd = async (
+  input: Uint8Array,
+  maxOutputLength: number,
+): Promise<Uint8Array> => {
+  const nodeZlib = await getNodeZlib()
+  const zstdDecompress = nodeZlib?.zstdDecompress
+  if (!zstdDecompress) {
+    throw new Error("This runtime does not support bounded zstd decompression")
   }
 
-  const nodeZlib = await getNodeZlib()
-  if (nodeZlib?.zstdDecompress) {
-    return new Promise((resolve, reject) => {
-      nodeZlib.zstdDecompress?.(input, (error, result) => {
-        if (error) {
-          reject(error)
+  return new Promise((resolve, reject) => {
+    zstdDecompress(input, { maxOutputLength }, (error, result) => {
+      if (error) {
+        if ("code" in error && error.code === "ERR_BUFFER_TOO_LARGE") {
+          reject(new DecompressedBodyTooLargeError())
           return
         }
 
-        resolve(toUint8Array(result))
-      })
+        reject(error)
+        return
+      }
+
+      if (result.byteLength > maxOutputLength) {
+        reject(new DecompressedBodyTooLargeError())
+        return
+      }
+
+      resolve(result)
     })
-  }
-
-  return decompressFallback(input)
+  })
 }
-
-const getBunRuntime = (): BunRuntime | undefined =>
-  (globalThis as { Bun?: BunRuntime }).Bun
 
 const getNodeZlib = async (): Promise<NodeZlibModule | null> => {
   nodeZlibPromise ??= import("node:zlib")
@@ -90,16 +119,4 @@ const getNodeZlib = async (): Promise<NodeZlibModule | null> => {
     .catch(() => null)
 
   return nodeZlibPromise
-}
-
-const toUint8Array = (data: BinaryData): Uint8Array => {
-  if (data instanceof Uint8Array) {
-    return data
-  }
-
-  if (data instanceof ArrayBuffer) {
-    return new Uint8Array(data)
-  }
-
-  return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
 }

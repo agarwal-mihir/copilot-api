@@ -21,6 +21,7 @@ await mock.module("~/lib/config", () => ({
     if (provider === "openrouter") return openrouterProviderConfig
     return null
   },
+  isCopilotOnlyMode: () => false,
 }))
 
 await mock.module("~/lib/token", () => ({

@@ -5,6 +5,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 interface ConfigFileShape {
+  copilotOnly?: boolean
   providers?: Record<
     string,
     {
@@ -41,7 +42,7 @@ function createTempDir(): string {
 function writeConfigFile(tempDir: string, config: ConfigFileShape): void {
   fs.writeFileSync(
     path.join(tempDir, "config.json"),
-    `${JSON.stringify(config, null, 2)}\n`,
+    `${JSON.stringify({ copilotOnly: false, ...config }, null, 2)}\n`,
     "utf8",
   )
 }
@@ -91,6 +92,20 @@ describe("auth login validation", () => {
 
     expect(output).toBe(
       "Unknown provider 'unknown'. Expected one of: copilot, codex, opencode-go, kimi, deepseek, dashscope, openrouter, custom",
+    )
+  })
+
+  test("rejects direct provider login in copilot-only mode", () => {
+    const tempDir = createTempDir()
+    writeConfigFile(tempDir, { copilotOnly: true })
+
+    const output = runScript(
+      tempDir,
+      'const { runAuthLogin } = await import("./src/auth"); try { await runAuthLogin({ provider: "codex", verbose: false, showToken: false }); console.log("unexpected-success"); } catch (error) { console.log(error instanceof Error ? error.message : String(error)); }',
+    )
+
+    expect(output).toBe(
+      "Provider 'codex' is disabled while copilotOnly is enabled",
     )
   })
 

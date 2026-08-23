@@ -13,10 +13,11 @@ export async function pollAccessToken(
 
   // Interval is in seconds, we need to multiply by 1000 to get milliseconds
   // I'm also adding another second, just to be safe
-  const sleepDuration = (deviceCode.interval + 1) * 1000
+  let sleepDuration = (deviceCode.interval + 1) * 1000
+  const expiresAt = Date.now() + deviceCode.expires_in * 1000
   consola.debug(`Polling access token with interval of ${sleepDuration}ms`)
 
-  while (true) {
+  while (Date.now() < expiresAt) {
     const response = await fetch(accessTokenUrl, {
       method: "POST",
       headers,
@@ -28,27 +29,50 @@ export async function pollAccessToken(
     })
 
     if (!response.ok) {
+      consola.warn(
+        `GitHub device authorization polling failed with HTTP ${response.status}.`,
+      )
       await sleep(sleepDuration)
-      consola.error("Failed to poll access token:", await response.text())
-
       continue
     }
 
-    const json = await response.json()
-    consola.debug("Polling access token response:", json)
-
-    const { access_token } = json as AccessTokenResponse
-
-    if (access_token) {
-      return access_token
-    } else {
-      await sleep(sleepDuration)
+    const result = (await response.json()) as AccessTokenResponse
+    if (typeof result.access_token === "string" && result.access_token.trim()) {
+      consola.debug("GitHub device authorization completed")
+      return result.access_token
     }
+
+    if (result.error === "authorization_pending") {
+      consola.debug("GitHub device authorization is pending")
+      await sleep(sleepDuration)
+      continue
+    }
+
+    if (result.error === "slow_down") {
+      sleepDuration += 5000
+      consola.debug(
+        `GitHub requested slower device authorization polling (${sleepDuration}ms)`,
+      )
+      await sleep(sleepDuration)
+      continue
+    }
+
+    const detail =
+      typeof result.error_description === "string" ?
+        `: ${result.error_description}`
+      : ""
+    const errorCode =
+      typeof result.error === "string" ? result.error : "unexpected_response"
+    throw new Error(
+      `GitHub device authorization failed (${errorCode})${detail}`,
+    )
   }
+
+  throw new Error("GitHub device authorization expired before completion")
 }
 
 interface AccessTokenResponse {
-  access_token: string
-  token_type: string
-  scope: string
+  access_token?: unknown
+  error?: unknown
+  error_description?: unknown
 }

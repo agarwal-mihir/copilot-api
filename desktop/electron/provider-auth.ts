@@ -1,5 +1,6 @@
 import {
   getRawProviderConfig,
+  isCopilotOnlyMode,
   isSupportedProviderType,
   listEnabledProviders,
   normalizeProviderBaseUrl,
@@ -40,6 +41,7 @@ export interface CodexDesktopLoginOptions {
 
 interface CodexDesktopLoginDependencies {
   getEnabledProviders?: () => string[]
+  isCopilotOnlyMode?: () => boolean
   loginCodex?: typeof loginCodex
   persistCodexCredentials?: typeof persistCodexCredentials
 }
@@ -255,6 +257,11 @@ export async function loginCodexForDesktop(
   options: CodexDesktopLoginOptions,
   dependencies: CodexDesktopLoginDependencies = {},
 ): Promise<AuthResult> {
+  const isCopilotOnly = dependencies.isCopilotOnlyMode ?? isCopilotOnlyMode
+  if (isCopilotOnly()) {
+    throw new Error("Provider 'codex' is disabled while copilotOnly is enabled")
+  }
+
   const login = dependencies.loginCodex ?? loginCodex
   const persistCredentials =
     dependencies.persistCodexCredentials ?? persistCodexCredentials

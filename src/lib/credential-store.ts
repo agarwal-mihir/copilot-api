@@ -64,6 +64,14 @@ export async function readGitHubToken(): Promise<string | null> {
   return normalizedToken || null
 }
 
+export async function readGitHubTokenFile(
+  filePath: string,
+): Promise<string | null> {
+  const token = await fs.readFile(filePath, "utf8")
+  const normalizedToken = token.trim()
+  return normalizedToken || null
+}
+
 export async function writeGitHubToken(token: string): Promise<void> {
   await writeProtectedFile(PATHS.GITHUB_TOKEN_PATH, token.trim())
 }

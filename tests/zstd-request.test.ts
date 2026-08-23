@@ -1,12 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
-import { zstdDecompressionMiddleware } from "~/lib/zstd-request"
+import {
+  createZstdDecompressionMiddleware,
+  zstdDecompressionMiddleware,
+} from "~/lib/zstd-request"
 
-const createApp = () => {
+const createApp = (middleware = zstdDecompressionMiddleware) => {
   const app = new Hono()
 
-  app.use(zstdDecompressionMiddleware)
+  app.use(middleware)
   app.post("/echo", async (c) =>
     c.json({
       contentEncoding: c.req.header("content-encoding") ?? null,
@@ -75,6 +78,30 @@ describe("zstd request middleware", () => {
       error: {
         message: "Failed to decompress zstd request body.",
         type: "invalid_request_error",
+      },
+    })
+  })
+
+  test("rejects oversized decompressed request bodies", async () => {
+    const app = createApp(createZstdDecompressionMiddleware(16))
+    const body = await Bun.zstdCompress(
+      JSON.stringify({ value: "x".repeat(32) }),
+    )
+
+    const response = await app.request("/echo", {
+      body,
+      headers: {
+        "content-encoding": "zstd",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    })
+
+    expect(response.status).toBe(413)
+    expect(await response.json()).toEqual({
+      error: {
+        message: "Decompressed request body is too large.",
+        type: "request_too_large",
       },
     })
   })

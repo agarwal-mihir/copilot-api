@@ -166,7 +166,6 @@ function getServerPath(): string {
 
 export async function startServer(
   port: number,
-  token: string | null,
   serverOptions?: {
     verbose?: boolean
     showToken?: boolean
@@ -200,7 +199,7 @@ export async function startServer(
     : false
 
   const serverPath = getServerPath()
-  const args = buildServerStartArgs(port, token)
+  const args = buildServerStartArgs(port)
   if (proxyEnabled) args.push('--proxy-env')
   if (serverOptions?.verbose) args.push('--verbose')
   if (serverOptions?.showToken) args.push('--show-token')

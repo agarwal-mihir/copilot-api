@@ -1,6 +1,7 @@
 import { Hono } from "hono"
-import { cors } from "hono/cors"
+import { bodyLimit } from "hono/body-limit"
 import { logger } from "hono/logger"
+import { secureHeaders } from "hono/secure-headers"
 import { readFileSync } from "node:fs"
 
 import {
@@ -8,7 +9,10 @@ import {
   getConfiguredAdminApiKeys,
 } from "./lib/request-auth"
 import { traceIdMiddleware } from "./lib/trace"
-import { zstdDecompressionMiddleware } from "./lib/zstd-request"
+import {
+  MAX_REQUEST_BODY_BYTES,
+  zstdDecompressionMiddleware,
+} from "./lib/zstd-request"
 import { alphaSearchRoutes } from "./routes/alpha-search/route"
 import { completionRoutes } from "./routes/chat-completions/route"
 import { configRoutes } from "./routes/admin/config/route"
@@ -29,7 +33,7 @@ export const server = new Hono()
 
 server.use(traceIdMiddleware)
 server.use(logger())
-server.use(cors())
+server.use(secureHeaders())
 server.use(
   "*",
   createAuthMiddleware({
@@ -42,13 +46,32 @@ server.use(
   createAuthMiddleware({
     getApiKeys: getConfiguredAdminApiKeys,
     allowUnauthenticatedPaths: [],
-    allowWhenNoApiKeys: false,
+  }),
+)
+server.use(
+  bodyLimit({
+    maxSize: MAX_REQUEST_BODY_BYTES,
+    onError: (c) =>
+      c.json(
+        {
+          error: {
+            message: "Request body is too large.",
+            type: "request_too_large",
+          },
+        },
+        413,
+      ),
   }),
 )
 server.use(zstdDecompressionMiddleware)
 
 server.get("/", (c) => c.text("Server running"))
 server.get("/usage-viewer", (c) => {
+  c.header(
+    "Content-Security-Policy",
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  )
+  c.header("Cache-Control", "no-store")
   const usageViewerFileUrl = new URL("../pages/index.html", import.meta.url)
   return c.html(readFileSync(usageViewerFileUrl, "utf8"))
 })

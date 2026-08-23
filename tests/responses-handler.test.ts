@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono, type Context } from "hono"
 
+import { COMPACT_REQUEST } from "~/lib/compact"
 import type { AnthropicMessagesPayload } from "~/lib/types/anthropic"
 import type { CompletionPayloadOptions } from "~/routes/messages/handler"
 import { MESSAGES_TOOL_CALL_TIPS } from "~/routes/responses/messages-translation"
@@ -1116,6 +1117,10 @@ describe("responses handler token usage", () => {
 
     expect(response.status).toBe(200)
     expect(createResponses).toHaveBeenCalledTimes(1)
+    expect(createResponses.mock.calls[0][1]).toMatchObject({
+      compactType: COMPACT_REQUEST,
+      transport: "http",
+    })
     expect(createResponses.mock.calls[0][0].context_management).toBeUndefined()
     expect(createResponses.mock.calls[0][0].input).toEqual([
       {

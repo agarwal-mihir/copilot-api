@@ -15,6 +15,7 @@ await mock.module("~/lib/config", () => ({
   ...actualConfigModule,
   getProviderConfig: (provider: string) => providerConfigs[provider] ?? null,
   getRawProviderConfig: (provider: string) => providerConfigs[provider] ?? null,
+  isCopilotOnlyMode: () => false,
   listEnabledProviders: () => enabledProviders,
 }))
 

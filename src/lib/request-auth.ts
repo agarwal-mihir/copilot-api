@@ -8,7 +8,6 @@ interface AuthMiddlewareOptions {
   getApiKeys?: () => Array<string>
   allowUnauthenticatedPaths?: Array<string>
   allowOptionsBypass?: boolean
-  allowWhenNoApiKeys?: boolean
   shouldSkipPath?: (path: string) => boolean
 }
 
@@ -46,8 +45,8 @@ export function getMissingApiKeysMessage(): string | null {
   }
 
   return [
-    "Requests currently bypass authentication.",
-    "Run `npx copilot-api auth keys --add <key>` to enable API key auth.",
+    "Protected requests are disabled until an API key is configured.",
+    "Run `copilot-api auth keys --add <key>` (or `bun run start auth keys --add <key>` from source) before connecting a client.",
   ].join(" ")
 }
 
@@ -105,7 +104,6 @@ export function createAuthMiddleware(
   const getApiKeys = options.getApiKeys ?? getConfiguredApiKeys
   const allowUnauthenticatedPaths = options.allowUnauthenticatedPaths ?? ["/"]
   const allowOptionsBypass = options.allowOptionsBypass ?? true
-  const allowWhenNoApiKeys = options.allowWhenNoApiKeys ?? true
   const shouldSkipPath = options.shouldSkipPath ?? (() => false)
 
   return async (c, next) => {
@@ -123,7 +121,7 @@ export function createAuthMiddleware(
 
     const apiKeys = getApiKeys()
     if (apiKeys.length === 0) {
-      return allowWhenNoApiKeys ? next() : createUnauthorizedResponse(c)
+      return createUnauthorizedResponse(c)
     }
 
     const requestApiKey = extractRequestApiKey(c)

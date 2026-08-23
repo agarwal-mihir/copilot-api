@@ -29,6 +29,7 @@
   "scripts": {
     "build": "tsdown",
     "build:desktop": "tsdown --config tsdown.desktop.config.ts",
+    "changelog": "changelogithub",
     "dev": "NODE_USE_SYSTEM_CA=1 bun run --watch ./src/main.ts",
     "knip": "knip-bun",
     "lint": "eslint --cache",
@@ -55,7 +56,6 @@
     "clipboardy": "^5.0.0",
     "consola": "^3.4.2",
     "fetch-event-stream": "^0.1.5",
-    "fzstd": "^0.1.1",
     "gpt-tokenizer": "^3.0.1",
     "hono": "^4.13.2",
     "proxy-from-env": "^1.1.0",
@@ -71,6 +71,7 @@
     "@types/proxy-from-env": "^1.0.4",
     "@types/winreg": "^1.2.36",
     "bumpp": "^10.2.3",
+    "changelogithub": "15.0.4",
     "eslint": "^9.37.0",
     "eslint-config-flat-gitignore": "^2.1.0",
     "eslint-config-prettier": "^10.1.8",

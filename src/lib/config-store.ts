@@ -29,6 +29,8 @@ export interface AppConfig {
   useResponsesApiWebSearch?: boolean
   alphaSearchCodexPriority?: boolean
   alphaSearchModel?: string
+  /** Reject every upstream except GitHub Copilot. Defaults to true. */
+  copilotOnly?: boolean
   // Copilot rejects Anthropic's web_search server tool on /v1/messages, so a
   // Claude request that only asks for web search is switched to this model.
   // A `provider/model` alias is passed straight through to that provider's
@@ -152,8 +154,9 @@ export const defaultConfig: AppConfig = {
   useResponsesApiWebSocket: true,
   responsesTransport: defaultResponsesTransportConfig,
   useResponsesApiWebSearch: true,
-  alphaSearchCodexPriority: true,
+  alphaSearchCodexPriority: false,
   alphaSearchModel: "gpt-5-mini",
+  copilotOnly: true,
   messageApiWebSearchModel: "gpt-5-mini",
 }
 
@@ -490,8 +493,14 @@ const positiveIntegerOrDefault = (value: unknown, fallback: number): number => {
 }
 
 export function getAnthropicApiKey(): string | undefined {
+  if (isCopilotOnlyMode()) return undefined
+
   const config = getConfig()
   return config.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY ?? undefined
+}
+
+export function isCopilotOnlyMode(): boolean {
+  return getConfig().copilotOnly !== false
 }
 
 export function isResponsesApiWebSearchEnabled(): boolean {
@@ -500,8 +509,10 @@ export function isResponsesApiWebSearchEnabled(): boolean {
 }
 
 export function isAlphaSearchCodexPriorityEnabled(): boolean {
+  if (isCopilotOnlyMode()) return false
+
   const config = getConfig()
-  return config.alphaSearchCodexPriority ?? true
+  return config.alphaSearchCodexPriority ?? false
 }
 
 export function getAlphaSearchModel(): string | undefined {

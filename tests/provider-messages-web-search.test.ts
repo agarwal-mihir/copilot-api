@@ -27,6 +27,7 @@ await mock.module("~/lib/config", () => ({
   ...actualConfigModule,
   getMessageApiWebSearchModel: () => messageApiWebSearchModel,
   getProviderConfig: (name: string) => providerConfigs[name] ?? null,
+  isCopilotOnlyMode: () => false,
   isResponsesApiWebSearchEnabled: () => true,
   isResponsesApiWebSocketEnabled: () => false,
   resolveMappedModel: (model: string) => model,

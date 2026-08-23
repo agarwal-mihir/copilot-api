@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, mock, test } from 'bun:test'
 
 import {
   configureDesktopProvider,
@@ -318,6 +318,7 @@ describe('desktop provider auth', () => {
       },
       {
         getEnabledProviders: () => ['codex'],
+        isCopilotOnlyMode: () => false,
         loginCodex: async (options) => {
           options.onAuth({ url: 'https://auth.example' })
           promptValue = await options.onPrompt('Paste code')
@@ -344,6 +345,27 @@ describe('desktop provider auth', () => {
       providers: ['codex'],
       success: true,
     })
+  })
+
+  test('rejects codex login before OAuth in copilot-only mode', async () => {
+    const loginCodex = mock(async () => {
+      throw new Error('OAuth should not start')
+    })
+    const openUrl = mock(() => {})
+
+    await expect(
+      loginCodexForDesktop(
+        { openUrl },
+        {
+          isCopilotOnlyMode: () => true,
+          loginCodex,
+        },
+      ),
+    ).rejects.toThrow(
+      "Provider 'codex' is disabled while copilotOnly is enabled",
+    )
+    expect(loginCodex).not.toHaveBeenCalled()
+    expect(openUrl).not.toHaveBeenCalled()
   })
 
   test('starts in provider mode only for provider auth mode', () => {

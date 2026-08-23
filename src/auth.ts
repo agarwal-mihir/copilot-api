@@ -5,6 +5,7 @@ import consola from "consola"
 
 import {
   getRawProviderConfig,
+  isCopilotOnlyMode,
   isSupportedProviderType,
   normalizeProviderBaseUrl,
   setProviderConfig,
@@ -485,6 +486,12 @@ async function loginWithProvider(provider: AuthProviderName): Promise<void> {
     return
   }
 
+  if (isCopilotOnlyMode()) {
+    throw new Error(
+      `Provider '${provider}' is disabled while copilotOnly is enabled`,
+    )
+  }
+
   if (provider === "codex") {
     await loginWithCodex()
     return
@@ -624,7 +631,7 @@ export async function runAuthKeys(options: RunAuthKeysOptions): Promise<void> {
   const currentKeys = getConfiguredApiKeys()
   if (currentKeys.length === 0) {
     consola.info(
-      "No API keys configured. Run `npx copilot-api auth keys --add <key>` to add one.",
+      "No API keys configured. Run `copilot-api auth keys --add <key>` (or `bun run start auth keys --add <key>` from source) to add one.",
     )
     return
   }

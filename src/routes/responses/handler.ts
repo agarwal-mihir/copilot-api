@@ -1,7 +1,9 @@
+import consola from "consola"
 import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
 
+import { COMPACT_REQUEST } from "~/lib/compact"
 import {
   isResponsesApiWebSearchEnabled as isConfiguredResponsesApiWebSearchEnabled,
   resolveMappedModel,
@@ -39,14 +41,14 @@ import { createStreamIdTracker, fixStreamIds } from "./stream-id-sync"
 import {
   applyResponsesApiContextManagement,
   compactInputByLatestCompaction,
-  getResponsesTransportForModel,
   getResponsesRequestOptions,
+  getResponsesTransportForModel,
+  hasTerminalCompactionTrigger,
   normalizeInputImageDetails,
   normalizeResponsesReasoningEffort,
   sanitizeOversizedInputImages,
   sanitizeUnsupportedInputFields,
 } from "./utils"
-import consola from "consola"
 
 const logger = createHandlerLogger("responses-handler")
 
@@ -110,7 +112,11 @@ export const handleResponses = async (c: Context) => {
       `Normalized reasoning effort from ${normalizedReasoningEffort.from} to ${normalizedReasoningEffort.to} based on the selected model capabilities`,
     )
   }
-  const responsesTransport = getResponsesTransportForModel(selectedModel)
+  const compactType =
+    hasTerminalCompactionTrigger(payload) ? COMPACT_REQUEST : undefined
+  const responsesTransport = getResponsesTransportForModel(selectedModel, {
+    compactType,
+  })
 
   const useMessagesFallback = shouldFallbackToMessages(
     c,
@@ -206,6 +212,7 @@ export const handleResponses = async (c: Context) => {
     requestId,
     sessionId: fallbackSessionId,
     signal: c.req.raw.signal,
+    compactType,
     transport: responsesTransport,
   })
 

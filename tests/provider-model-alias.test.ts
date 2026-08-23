@@ -32,6 +32,7 @@ await mock.module("~/lib/config", () => ({
     providerConfig && name === providerConfig.name ? providerConfig : null,
   getRawProviderConfig: (name: string) =>
     providerConfig && name === providerConfig.name ? providerConfig : null,
+  isCopilotOnlyMode: () => false,
   resolveMappedModel: (model: string) => modelMappings[model] ?? model,
 }))
 

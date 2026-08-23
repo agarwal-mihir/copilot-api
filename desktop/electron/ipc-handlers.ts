@@ -283,7 +283,7 @@ export function registerIpcHandlers(
       // Persist the last used port
       await writeSettings({ ...settings, lastPort: port })
 
-      return startServer(port, tokenForStart, serverOptions)
+      return startServer(port, serverOptions)
     },
   )
 
