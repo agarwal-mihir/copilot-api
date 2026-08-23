@@ -6,6 +6,8 @@ import {
   reloadConfig,
   writeConfigToDisk,
 } from "./config-store"
+import { ModelNotAllowedError } from "./error"
+import { toClientModelId } from "./models"
 
 const GPT_MODEL_PATTERN = /^gpt-(\d+)(?:\.(\d+))?/
 
@@ -123,6 +125,41 @@ export function setModelMappings(
 
 export function resolveMappedModel(model: string): string {
   return getModelMappings()[model] ?? model
+}
+
+export function isCopilotModelAllowedByPolicy(
+  model: string,
+  configured: unknown,
+): boolean {
+  if (configured === undefined) {
+    return true
+  }
+  if (!Array.isArray(configured)) {
+    return false
+  }
+
+  const allowedModels = new Set(
+    configured.flatMap((entry) => {
+      if (typeof entry !== "string" || !entry.trim()) {
+        return []
+      }
+      return [toClientModelId(entry.trim())]
+    }),
+  )
+  return allowedModels.has(toClientModelId(model))
+}
+
+export function isCopilotModelAllowed(model: string): boolean {
+  return isCopilotModelAllowedByPolicy(model, getConfig().copilotAllowedModels)
+}
+
+export function assertCopilotModelAllowed(
+  model: string,
+  configured: unknown = getConfig().copilotAllowedModels,
+): void {
+  if (!isCopilotModelAllowedByPolicy(model, configured)) {
+    throw new ModelNotAllowedError(model)
+  }
 }
 
 export function getSmallModel(): string {

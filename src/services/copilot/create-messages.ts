@@ -15,6 +15,7 @@ import {
   prepareInteractionHeaders,
   prepareMessageProxyHeaders,
 } from "~/lib/api-config"
+import { assertCopilotModelAllowed } from "~/lib/config"
 import { logCopilotRateLimits } from "~/lib/copilot-rate-limit"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
@@ -73,6 +74,7 @@ export const createMessages = async (
   },
 ): Promise<CreateMessagesReturn> => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
+  assertCopilotModelAllowed(payload.model)
 
   const enableVision = payload.messages.some((message) => {
     if (!Array.isArray(message.content)) return false

@@ -10,11 +10,17 @@ const actualTokenModule = await import("~/lib/token")
 let enabledProviders: Array<string> = []
 let providerConfigs: Record<string, ResolvedProviderConfig | null> = {}
 let codexSetupError: Error | null = null
+let copilotAllowedModels: unknown
 
 await mock.module("~/lib/config", () => ({
   ...actualConfigModule,
   getProviderConfig: (provider: string) => providerConfigs[provider] ?? null,
   getRawProviderConfig: (provider: string) => providerConfigs[provider] ?? null,
+  isCopilotModelAllowed: (model: string) =>
+    actualConfigModule.isCopilotModelAllowedByPolicy(
+      model,
+      copilotAllowedModels,
+    ),
   isCopilotOnlyMode: () => false,
   listEnabledProviders: () => enabledProviders,
 }))
@@ -189,6 +195,7 @@ beforeEach(() => {
   enabledProviders = []
   providerConfigs = {}
   codexSetupError = null
+  copilotAllowedModels = undefined
   codexCatalogModels = createDefaultCodexCatalogModels()
   state.models = undefined
   fetchMock.mockClear()
@@ -241,6 +248,41 @@ describe("model routes", () => {
       "gpt-5",
       "second/second-model",
       "first/first-model",
+    ])
+  })
+
+  test("filters regular and Codex Copilot model catalogs through the allowlist", async () => {
+    state.models = createCopilotModels([
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5-mini",
+      "claude-opus-5",
+    ])
+    for (const model of state.models.data) {
+      model.supported_endpoints =
+        model.id.startsWith("claude") ? ["/v1/messages"] : ["/responses"]
+      model.capabilities.supports.tool_calls = true
+    }
+    copilotAllowedModels = ["gpt-5.6-sol", "claude-opus-5"]
+
+    const regularResponse = await createApp().request("/v1/models")
+    const regularBody = (await regularResponse.json()) as {
+      data: Array<{ id: string }>
+    }
+    expect(regularBody.data.map((model) => model.id)).toEqual([
+      "gpt-5.6-sol",
+      "claude-opus-5",
+    ])
+
+    const codexResponse = await createApp().request("/v1/models", {
+      headers: { "user-agent": "codex-cli/1.0.0" },
+    })
+    const codexBody = (await codexResponse.json()) as {
+      models: Array<{ slug: string }>
+    }
+    expect(codexBody.models.map((model) => model.slug)).toEqual([
+      "gpt-5.6-sol",
+      "claude-opus-5",
     ])
   })
 

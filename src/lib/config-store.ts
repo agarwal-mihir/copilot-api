@@ -13,6 +13,7 @@ export interface AppConfig {
     adminApiKey?: string
   }
   providers?: Record<string, ProviderConfig>
+  copilotAllowedModels?: Array<string>
   modelMappings?: Record<string, string>
   extraPrompts?: Record<string, string>
   smallModel?: string

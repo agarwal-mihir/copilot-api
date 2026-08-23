@@ -2,6 +2,7 @@ import { Hono } from "hono"
 
 import {
   listEnabledProviders,
+  isCopilotModelAllowed,
   resolveEffectiveProviderType,
   type CodexReasoningEffort,
   type ModelConfig,
@@ -198,7 +199,9 @@ async function getProviderModels(
 async function getAggregatedModels(
   requestHeaders: Headers,
 ): Promise<Array<ClientModel>> {
-  const copilotModels = state.models?.data.map(normalizeCopilotModel) ?? []
+  const copilotModels = (state.models?.data ?? [])
+    .filter((model) => isCopilotModelAllowed(model.id))
+    .map(normalizeCopilotModel)
   const providerModelsByProvider = await Promise.all(
     listEnabledProviders().map((provider) =>
       getProviderModels(provider, requestHeaders),
@@ -255,7 +258,7 @@ function getCopilotCodexCandidates(): Array<SyntheticCodexModelCandidate> {
   const candidates: Array<SyntheticCodexModelCandidate> = []
   for (const model of state.models?.data ?? []) {
     try {
-      if (isCopilotCodexCandidate(model)) {
+      if (isCopilotModelAllowed(model.id) && isCopilotCodexCandidate(model)) {
         candidates.push(createCopilotCodexCandidate(model))
       }
     } catch (error) {

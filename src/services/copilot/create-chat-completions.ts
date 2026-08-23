@@ -14,6 +14,7 @@ import {
   prepareForCompact,
   prepareInteractionHeaders,
 } from "~/lib/api-config"
+import { assertCopilotModelAllowed } from "~/lib/config"
 import { logCopilotRateLimits } from "~/lib/copilot-rate-limit"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
@@ -28,6 +29,7 @@ export const createChatCompletions = async (
   },
 ) => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
+  assertCopilotModelAllowed(payload.model)
 
   const enableVision = payload.messages.some(
     (x) =>

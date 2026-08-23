@@ -19,7 +19,10 @@ import {
   prepareInteractionHeaders,
 } from "~/lib/api-config"
 import { COMPACT_REQUEST, type CompactType } from "~/lib/compact"
-import { getResponsesTransportConfig } from "~/lib/config"
+import {
+  assertCopilotModelAllowed,
+  getResponsesTransportConfig,
+} from "~/lib/config"
 import {
   logCopilotQuotaSnapshots,
   logCopilotRateLimits,
@@ -66,6 +69,7 @@ export const createResponses = async (
   }: ResponsesRequestOptions,
 ): Promise<CreateResponsesReturn> => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
+  assertCopilotModelAllowed(payload.model)
 
   const headers: Record<string, string> = {
     ...copilotHeaders(state, requestId, vision),

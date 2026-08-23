@@ -12,6 +12,16 @@ export class HTTPError extends Error {
   }
 }
 
+export class ModelNotAllowedError extends Error {
+  readonly model: string
+
+  constructor(model: string) {
+    super(`Model "${model}" is not allowed by the Copilot model policy.`)
+    this.name = "ModelNotAllowedError"
+    this.model = model
+  }
+}
+
 export async function forwardError(
   c: Context,
   error: unknown,
@@ -24,6 +34,18 @@ export async function forwardError(
   }
 
   consola.error("Error occurred:", error)
+
+  if (error instanceof ModelNotAllowedError) {
+    return c.json(
+      {
+        error: {
+          message: error.message,
+          type: "model_not_allowed",
+        },
+      },
+      403,
+    )
+  }
 
   if (error instanceof HTTPError) {
     if (error.response.status === 429) {
