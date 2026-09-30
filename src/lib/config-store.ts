@@ -14,6 +14,7 @@ export interface AppConfig {
   }
   providers?: Record<string, ProviderConfig>
   copilotAllowedModels?: Array<string>
+  codexModelAllowlist?: Array<string>
   modelMappings?: Record<string, string>
   extraPrompts?: Record<string, string>
   smallModel?: string
@@ -434,6 +435,10 @@ export function mergeConfigWithDefaults(): AppConfig {
 export function getConfig(): AppConfig {
   cachedConfig ??= mergeDefaultConfig(readConfigFromDisk()).mergedConfig
   return cachedConfig
+}
+
+export function getCodexModelAllowlist(): unknown {
+  return getConfig().codexModelAllowlist
 }
 
 export function reloadConfig(): AppConfig {

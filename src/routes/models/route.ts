@@ -1,8 +1,10 @@
 import { Hono } from "hono"
 
 import {
+  getCodexModelAllowlist,
   listEnabledProviders,
   isCopilotModelAllowed,
+  isCopilotModelAllowedByPolicy,
   resolveEffectiveProviderType,
   type CodexReasoningEffort,
   type ModelConfig,
@@ -258,8 +260,17 @@ function getCopilotCodexCandidates(): Array<SyntheticCodexModelCandidate> {
   const candidates: Array<SyntheticCodexModelCandidate> = []
   for (const model of state.models?.data ?? []) {
     try {
-      if (isCopilotModelAllowed(model.id) && isCopilotCodexCandidate(model)) {
-        candidates.push(createCopilotCodexCandidate(model))
+      if (isCopilotCodexCandidate(model)) {
+        // Disallowed models, and allowed models outside codexModelAllowlist,
+        // stay in the Codex catalog only as hidden entries so they override
+        // the matching models in Codex's bundled catalog.
+        candidates.push({
+          ...createCopilotCodexCandidate(model),
+          hidden: !(
+            isCopilotModelAllowed(model.id)
+            && isCopilotModelAllowedByPolicy(model.id, getCodexModelAllowlist())
+          ),
+        })
       }
     } catch (error) {
       logger.warn("models.codex.copilot_skip_error", {

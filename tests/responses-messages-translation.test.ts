@@ -577,6 +577,43 @@ describe("Responses Lite to Messages translation", () => {
     ])
   })
 
+  test("marks signature-only Claude reasoning and replays it without synthetic text", () => {
+    const translation = translate({ input: "Hello" })
+    const response: AnthropicResponse = {
+      content: [
+        { type: "thinking", thinking: "", signature: "claude-signature" },
+      ],
+      id: "msg_reasoning",
+      model: "claude-sonnet-4.6",
+      role: "assistant",
+      stop_reason: "end_turn",
+      stop_sequence: null,
+      type: "message",
+      usage: { input_tokens: 4, output_tokens: 2 },
+    }
+
+    const output = translateAnthropicToResponses(response, translation)
+      .output[0]
+    expect(output?.type).toBe("reasoning")
+    if (output?.type !== "reasoning") return
+    expect(output.id.endsWith("__a1")).toBe(true)
+
+    const replay = translate({
+      input: [
+        { role: "user", type: "message", content: "Hello" },
+        {
+          type: "reasoning",
+          id: output.id,
+          summary: [],
+          encrypted_content: output.encrypted_content ?? "",
+        },
+      ],
+    })
+    expect(replay.messagesPayload.messages.at(-1)?.content).toEqual([
+      { type: "thinking", thinking: "", signature: "claude-signature" },
+    ])
+  })
+
   test("restores namespace on Responses function calls", () => {
     const translation = translate({
       input: [
@@ -1044,6 +1081,7 @@ describe("Responses Lite to Messages translation", () => {
     })
 
     expect(reasoningItems).toHaveLength(4)
+    expect(reasoningItems.every((item) => item.id.endsWith("__a1"))).toBe(true)
     expect(reasoningItems[0]?.encrypted_content).toBe("")
     expect(reasoningItems[1]?.encrypted_content).toBe("")
     expect(reasoningItems[2]?.encrypted_content).toBe("")

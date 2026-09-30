@@ -3,6 +3,7 @@ import { Hono } from "hono"
 
 import type { ResolvedProviderConfig } from "~/lib/config"
 import type { ModelsResponse } from "~/lib/types/models"
+import type { CodexModelsResponse } from "~/routes/models/codex-models-types"
 
 const actualConfigModule = await import("~/lib/config")
 const actualTokenModule = await import("~/lib/token")
@@ -11,11 +12,13 @@ let enabledProviders: Array<string> = []
 let providerConfigs: Record<string, ResolvedProviderConfig | null> = {}
 let codexSetupError: Error | null = null
 let copilotAllowedModels: unknown
+let codexModelAllowlist: unknown
 
 await mock.module("~/lib/config", () => ({
   ...actualConfigModule,
   getProviderConfig: (provider: string) => providerConfigs[provider] ?? null,
   getRawProviderConfig: (provider: string) => providerConfigs[provider] ?? null,
+  getCodexModelAllowlist: () => codexModelAllowlist,
   isCopilotModelAllowed: (model: string) =>
     actualConfigModule.isCopilotModelAllowedByPolicy(
       model,
@@ -196,6 +199,7 @@ beforeEach(() => {
   providerConfigs = {}
   codexSetupError = null
   copilotAllowedModels = undefined
+  codexModelAllowlist = undefined
   codexCatalogModels = createDefaultCodexCatalogModels()
   state.models = undefined
   fetchMock.mockClear()
@@ -278,12 +282,62 @@ describe("model routes", () => {
       headers: { "user-agent": "codex-cli/1.0.0" },
     })
     const codexBody = (await codexResponse.json()) as {
-      models: Array<{ slug: string }>
+      models: Array<{ slug: string; visibility: string }>
     }
-    expect(codexBody.models.map((model) => model.slug)).toEqual([
+    expect(
+      codexBody.models
+        .filter((model) => model.visibility !== "hide")
+        .map((model) => model.slug),
+    ).toEqual(["gpt-5.6-sol", "claude-opus-5"])
+    expect(
+      codexBody.models
+        .filter((model) => model.visibility === "hide")
+        .map((model) => model.slug)
+        .sort(),
+    ).toEqual(["gpt-5-mini", "gpt-5.6-terra"])
+  })
+
+  test("codexModelAllowlist narrows only the Codex picker", async () => {
+    state.models = createCopilotModels([
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5-mini",
+      "claude-opus-5",
+    ])
+    for (const model of state.models.data) {
+      model.supported_endpoints =
+        model.id.startsWith("claude") ? ["/v1/messages"] : ["/responses"]
+      model.capabilities.supports.tool_calls = true
+    }
+    copilotAllowedModels = ["gpt-5.6-sol", "claude-opus-5"]
+    codexModelAllowlist = ["gpt-5.6-sol", "gpt-5.6-terra"]
+
+    const regularResponse = await createApp().request("/v1/models")
+    const regularBody = (await regularResponse.json()) as {
+      data: Array<{ id: string }>
+    }
+    expect(regularBody.data.map((model) => model.id)).toEqual([
       "gpt-5.6-sol",
       "claude-opus-5",
     ])
+
+    const codexResponse = await createApp().request("/v1/models", {
+      headers: { "user-agent": "codex-cli/1.0.0" },
+    })
+    const codexBody = (await codexResponse.json()) as {
+      models: Array<{ slug: string; visibility: string }>
+    }
+    expect(
+      codexBody.models
+        .filter((model) => model.visibility !== "hide")
+        .map((model) => model.slug),
+    ).toEqual(["gpt-5.6-sol"])
+    expect(
+      codexBody.models
+        .filter((model) => model.visibility === "hide")
+        .map((model) => model.slug)
+        .sort(),
+    ).toEqual(["claude-opus-5", "gpt-5-mini", "gpt-5.6-terra"])
   })
 
   test("returns provider models in provider-only mode and skips failed providers", async () => {
@@ -677,6 +731,77 @@ describe("model routes", () => {
       "You are Codex, an agent based on GPT-5.",
     )
   })
+
+  test.each(["default", "upstream", "upstream without messages"])(
+    "enables async clarification only for Astra with the %s template",
+    async (templateSource) => {
+      const copilotModels = createCopilotModels(["gpt-6-astra", "gpt-5.6-sol"])
+      for (const model of copilotModels.data) {
+        model.supported_endpoints = ["/responses"]
+        model.capabilities.supports.tool_calls = true
+      }
+      state.models = copilotModels
+      const originalMessages = {
+        instructions_template: "Existing upstream instructions",
+        instructions_variables: { personality_default: "Preserve me" },
+        approvals: { existing: true },
+        auto_review: null,
+        permissions: { existing: true },
+      }
+      if (templateSource !== "default") {
+        providerConfigs.codex = {
+          apiKey: "codex-token",
+          authType: "oauth2",
+          baseUrl: "https://chatgpt.com/backend-api",
+          name: "codex",
+          type: "openai-responses",
+        }
+        state.codexAccessToken = "codex-access-token"
+        state.codexAccountId = "account-123"
+        if (templateSource === "upstream") {
+          codexCatalogModels[0].model_messages = originalMessages
+        }
+      }
+
+      const response = await createApp().request("/v1/models?client=codex", {
+        headers: { "user-agent": "codex-cli/0.153.4" },
+      })
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as CodexModelsResponse
+      const astra = body.models.find((model) => model.slug === "gpt-6-astra")!
+      const sol = body.models.find((model) => model.slug === "gpt-5.6-sol")!
+      expect(astra.experimental_supported_tools).toEqual([
+        "request_user_input_async",
+      ])
+      expect(sol.experimental_supported_tools).toEqual([])
+      const instructions = astra.model_messages.instructions_template
+      expect(instructions).toContain("## Asynchronous clarification questions")
+      expect(instructions).toContain("It accepts text only")
+      expect(instructions).toContain("60 seconds")
+      expect(instructions).toContain(
+        "If an answer is required for safe progress",
+      )
+      if (templateSource === "upstream") {
+        expect(astra.model_messages).toEqual({
+          ...originalMessages,
+          instructions_template: instructions,
+        })
+        expect(
+          instructions.startsWith(originalMessages.instructions_template),
+        ).toBe(true)
+        expect(sol.model_messages).toEqual(originalMessages)
+        expect(body.models[0]).toMatchObject(codexCatalogModels[0])
+        expect(codexCatalogModels[0].model_messages).toEqual(originalMessages)
+      } else {
+        expect(instructions).toStartWith(
+          "You are Codex, an agent based on GPT-5.",
+        )
+        expect(sol.model_messages?.instructions_template ?? "").not.toContain(
+          "## Asynchronous clarification questions",
+        )
+      }
+    },
+  )
 
   test("copies matching Codex catalog models for provider-prefixed aliases", async () => {
     const solCatalogModel = {

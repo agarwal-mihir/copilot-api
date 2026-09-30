@@ -14,6 +14,10 @@ import { createProviderProxyResponse } from "~/services/providers/provider-proxy
 
 const logger = createHandlerLogger("codex-models-handler")
 const CODEX_USER_AGENT_PATTERN = /^codex/iu
+const ASTRA_ASYNC_QUESTION_GUIDANCE = `## Asynchronous clarification questions
+
+When the available tools include request_user_input_async, use it for optional clarification while continuing useful work that does not depend on the answer. It accepts text only; do not ask for file uploads or screenshots through this tool. Allow a bounded wait (for example, 60 seconds) for optional clarification, then proceed with a reasonable stated assumption if no answer arrives. If the tool is unavailable, ask in plain text instead. If an answer is required for safe progress, stop and ask the user rather than treating it as optional.`
+
 const FALLBACK_AVAILABLE_IN_PLANS: CodexModel["available_in_plans"] = [
   "business",
   "edu",
@@ -455,7 +459,7 @@ export function createSyntheticCodexModel(
     display_name: candidate.displayName,
     description: candidate.description,
     priority,
-    visibility: "list",
+    visibility: candidate.hidden ? "hide" : "list",
     supported_in_api: true,
     minimal_client_version: "0.0.0",
     prefer_websockets: false,
@@ -468,7 +472,8 @@ export function createSyntheticCodexModel(
     tool_mode: "code_mode_only",
     multi_agent_version: "v2",
     shell_type: "shell_command",
-    experimental_supported_tools: [],
+    experimental_supported_tools:
+      candidate.slug === "gpt-6-astra" ? ["request_user_input_async"] : [],
     input_modalities: inputModalities,
     supports_image_detail_original: false,
     supports_parallel_tool_calls: true,
@@ -490,7 +495,13 @@ export function createSyntheticCodexModel(
     availability_nux: null,
     upgrade: null,
     available_in_plans: template.available_in_plans,
-    model_messages: template.model_messages,
+    model_messages:
+      candidate.slug === "gpt-6-astra" ?
+        {
+          ...template.model_messages,
+          instructions_template: `${template.model_messages?.instructions_template ?? DEFAULT_CODEX_TEMPLATE.model_messages.instructions_template}\n\n${ASTRA_ASYNC_QUESTION_GUIDANCE}`,
+        }
+      : template.model_messages,
     auto_review_model_override: null,
     default_service_tier: null,
     service_tiers: [],

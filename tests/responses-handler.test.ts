@@ -145,6 +145,176 @@ afterEach(async () => {
   Object.assign(responsesUtilsDependencies, defaultResponsesUtilsDependencies)
 })
 
+describe("responses reasoning transport isolation", () => {
+  test("drops native reasoning on a GPT-to-Claude switch without losing messages or tools", async () => {
+    state.models = {
+      object: "list",
+      data: [
+        {
+          capabilities: { limits: { max_prompt_tokens: 128000 } },
+          id: "claude-test",
+          supported_endpoints: ["/v1/messages"],
+        },
+      ],
+    } as typeof state.models
+    const handleMessages = mock(
+      (_context: Context, _payload: AnthropicMessagesPayload) =>
+        Promise.resolve(
+          Response.json({
+            content: [{ type: "text", text: "Done" }],
+            id: "msg-switch",
+            model: "claude-test",
+            role: "assistant",
+            stop_reason: "end_turn",
+            stop_sequence: null,
+            type: "message",
+            usage: { input_tokens: 8, output_tokens: 2 },
+          }),
+        ),
+    )
+    responsesMessagesDependencies.handleCompletionPayload = handleMessages
+
+    const response = await createApp().request("/v1/responses", {
+      body: JSON.stringify({
+        model: "claude-test",
+        input: [
+          { role: "user", type: "message", content: "Find the bug" },
+          {
+            id: "rs_native",
+            type: "reasoning",
+            summary: [],
+            encrypted_content: "gpt-signature",
+          },
+          { role: "assistant", type: "message", content: "Visible answer" },
+          {
+            id: "rs_messages__a1",
+            type: "reasoning",
+            summary: [],
+            encrypted_content: "claude-signature",
+          },
+          {
+            type: "function_call",
+            call_id: "call-1",
+            name: "read_file",
+            arguments: "{}",
+          },
+          { type: "function_call_output", call_id: "call-1", output: "Done" },
+          { role: "user", type: "message", content: "Continue" },
+        ],
+        tools: [
+          {
+            type: "function",
+            name: "read_file",
+            description: "Read a file",
+            parameters: { type: "object" },
+            strict: false,
+          },
+        ],
+      }),
+      headers: {
+        "content-type": "application/json",
+        "user-agent": "codex-cli/0.154.0",
+      },
+      method: "POST",
+    })
+
+    expect(response.status).toBe(200)
+    expect(createResponses).not.toHaveBeenCalled()
+    const forwarded = handleMessages.mock.calls[0]?.[1]
+    expect(
+      forwarded?.messages.flatMap((message) =>
+        message.role === "assistant" && Array.isArray(message.content) ?
+          message.content.flatMap((block) =>
+            block.type === "thinking" ? [block.signature] : [],
+          )
+        : [],
+      ),
+    ).toEqual(["claude-signature"])
+    expect(
+      forwarded?.messages.some((message) =>
+        JSON.stringify(message.content).includes("Visible answer"),
+      ),
+    ).toBe(true)
+    expect(
+      forwarded?.messages.some(
+        (message) =>
+          message.role === "assistant"
+          && Array.isArray(message.content)
+          && message.content.some(
+            (block) => block.type === "tool_use" && block.id === "call-1",
+          ),
+      ),
+    ).toBe(true)
+    expect(
+      forwarded?.messages.some(
+        (message) =>
+          message.role === "user"
+          && Array.isArray(message.content)
+          && message.content.some((block) => block.type === "tool_result"),
+      ),
+    ).toBe(true)
+  })
+
+  test("drops Claude reasoning on a Claude-to-GPT switch without losing messages or tools", async () => {
+    createResponses.mockImplementation((payload) =>
+      Promise.resolve(createResponsesResult(payload.model)),
+    )
+
+    const response = await createApp().request("/v1/responses", {
+      body: JSON.stringify({
+        model: "gpt-test",
+        input: [
+          { role: "user", type: "message", content: "Find the bug" },
+          {
+            id: "rs_messages__a1",
+            type: "reasoning",
+            summary: [],
+            encrypted_content: "claude-signature",
+          },
+          { role: "assistant", type: "message", content: "Visible answer" },
+          {
+            id: "rs_native",
+            type: "reasoning",
+            summary: [],
+            encrypted_content: "gpt-signature",
+          },
+          {
+            type: "function_call",
+            call_id: "call-1",
+            name: "read_file",
+            arguments: "{}",
+          },
+        ],
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    })
+
+    expect(response.status).toBe(200)
+    const forwarded = createResponses.mock.calls[0]?.[0].input
+    expect(Array.isArray(forwarded)).toBe(true)
+    if (!Array.isArray(forwarded)) return
+    expect(
+      forwarded.flatMap((item) =>
+        item.type === "reasoning" ? [item.encrypted_content] : [],
+      ),
+    ).toEqual(["gpt-signature"])
+    expect(
+      forwarded.some(
+        (item) =>
+          item.type === "message"
+          && item.role === "assistant"
+          && item.content === "Visible answer",
+      ),
+    ).toBe(true)
+    expect(
+      forwarded.some(
+        (item) => item.type === "function_call" && item.call_id === "call-1",
+      ),
+    ).toBe(true)
+  })
+})
+
 describe("responses handler token usage", () => {
   test("routes a Messages-only Copilot model through the Responses Lite adapter", async () => {
     state.models = {

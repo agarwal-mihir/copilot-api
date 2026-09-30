@@ -155,4 +155,5 @@ export interface SyntheticCodexModelCandidate {
   inputModalities: Array<CodexInputModality>
   reasoningEfforts: Array<CodexReasoningEffort>
   defaultReasoningEffort: CodexReasoningEffort
+  hidden?: boolean
 }
