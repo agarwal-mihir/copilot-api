@@ -128,7 +128,12 @@ interface ResponsesInputNormalization {
 
 export function translateResponsesToMessages(
   payload: ResponsesPayload,
-  options: { model: string; publicModel?: string; toolCallTips?: boolean },
+  options: {
+    defaultMaxOutputTokens?: number
+    model: string
+    publicModel?: string
+    toolCallTips?: boolean
+  },
 ): ResponsesToMessagesTranslation {
   const registry = createToolRegistry(payload)
   const normalized = normalizeResponsesInput(payload.input)
@@ -157,7 +162,10 @@ export function translateResponsesToMessages(
   const messagesPayload: AnthropicMessagesPayload = {
     model: options.model,
     messages,
-    max_tokens: Math.max(1, payload.max_output_tokens ?? 32_000),
+    max_tokens: Math.max(
+      1,
+      payload.max_output_tokens ?? options.defaultMaxOutputTokens ?? 32_000,
+    ),
     stream: payload.stream ?? false,
     temperature: payload.temperature ?? undefined,
     top_p: payload.top_p ?? undefined,
@@ -301,6 +309,43 @@ export function resolveToolDescriptor(
       name: alias,
     }
   )
+}
+
+/** Detects Codex code mode, whose only direct tool is the freeform `exec`. */
+export function hasCodeModeExecTool(payload: ResponsesPayload): boolean {
+  const registry = createToolRegistry(payload)
+  for (const descriptor of registry.byAlias.values()) {
+    if (descriptor.kind === "custom" && descriptor.name === "exec") return true
+  }
+  return false
+}
+
+/**
+ * Native Responses backends reject Messages-backed compaction carriers, so
+ * replay their plain-text summaries as user messages instead.
+ */
+export function replaceMessagesCompactionsWithReplay(
+  payload: ResponsesPayload,
+): number {
+  if (!Array.isArray(payload.input)) return 0
+
+  let replaced = 0
+  payload.input = payload.input.map((item) => {
+    if (getItemType(item) !== "compaction") return item
+    const encryptedContent = getStringField(item, "encrypted_content")
+    const summary =
+      encryptedContent ? decodeMessagesCompaction(encryptedContent) : null
+    if (!summary) return item
+
+    replaced += 1
+    const replayMessage: ResponseInputMessage = {
+      type: "message",
+      role: "user",
+      content: `${COMPACTION_REPLAY_PROMPT}${summary}`,
+    }
+    return replayMessage
+  })
+  return replaced
 }
 
 export function decodeCustomToolInput(input: unknown): string {

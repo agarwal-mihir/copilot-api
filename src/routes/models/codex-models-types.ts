@@ -64,7 +64,7 @@ export interface CodexTruncationPolicy {
   limit: number
 }
 
-export type CodexToolMode = "code_mode" | "code_mode_only"
+export type CodexToolMode = "direct" | "code_mode" | "code_mode_only"
 
 export type CodexMultiAgentVersion = "v1" | "v2"
 
@@ -156,4 +156,5 @@ export interface SyntheticCodexModelCandidate {
   reasoningEfforts: Array<CodexReasoningEffort>
   defaultReasoningEffort: CodexReasoningEffort
   hidden?: boolean
+  messagesBacked?: boolean
 }

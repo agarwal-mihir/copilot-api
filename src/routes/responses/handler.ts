@@ -37,7 +37,10 @@ import type {
 import { createResponses as createCopilotResponses } from "~/services/copilot/create-responses"
 
 import { handleResponsesViaMessages } from "./messages-handler"
-import { isMessagesReasoningId } from "./messages-translation"
+import {
+  isMessagesReasoningId,
+  replaceMessagesCompactionsWithReplay,
+} from "./messages-translation"
 import { createStreamIdTracker, fixStreamIds } from "./stream-id-sync"
 import {
   applyResponsesApiContextManagement,
@@ -134,6 +137,10 @@ export const handleResponses = async (c: Context) => {
       subagentMarker,
       requestId,
       sessionId: fallbackSessionId,
+      defaultMaxOutputTokens:
+        payload.stream ?
+          selectedModel?.capabilities.limits.max_output_tokens
+        : undefined,
     })
   }
 
@@ -152,6 +159,12 @@ export const handleResponses = async (c: Context) => {
 
   filterReasoningForTransport(payload, false)
 
+  const replayedCompactionCount = replaceMessagesCompactionsWithReplay(payload)
+  if (replayedCompactionCount > 0) {
+    logger.debug(
+      `Replayed ${replayedCompactionCount} Messages-backed compaction(s) as plain-text summaries for Copilot Responses`,
+    )
+  }
   const recordUsage = createCopilotTokenUsageRecorder({
     endpoint: "responses",
     fallbackSessionId,

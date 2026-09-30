@@ -9,8 +9,10 @@ import { requestContext } from "~/lib/request-context"
 import {
   decodeMessagesCompaction,
   encodeMessagesCompaction,
+  hasCodeModeExecTool,
   MESSAGES_COMPACTION_PREFIX,
   MESSAGES_TOOL_CALL_TIPS,
+  replaceMessagesCompactionsWithReplay,
   ResponsesMessagesTranslationError,
   translateAnthropicToResponses,
   translateResponsesToMessages,
@@ -443,6 +445,80 @@ describe("Responses Lite to Messages translation", () => {
     expect(decodeMessagesCompaction(encoded)).toBe(summary)
     expect(decodeMessagesCompaction(legacy)).toBe(summary)
     expect(decodeMessagesCompaction("not base64")).toBeNull()
+  })
+
+  test("defaults max_tokens to the caller limit only when the request has none", () => {
+    const input = [
+      { role: "user" as const, content: "hi", type: "message" as const },
+    ]
+    const withDefault = (payload: Omit<ResponsesPayload, "model">) =>
+      translateResponsesToMessages(
+        { model: "claude-opus-5.5", ...payload },
+        { model: "claude-opus-5.5", defaultMaxOutputTokens: 128_000 },
+      ).messagesPayload.max_tokens
+
+    expect(translate({ input }).messagesPayload.max_tokens).toBe(32_000)
+    expect(withDefault({ input })).toBe(128_000)
+    expect(withDefault({ input, max_output_tokens: 4_096 })).toBe(4_096)
+  })
+
+  test("detects the Codex code-mode exec tool", () => {
+    const execTool = {
+      type: "custom" as const,
+      name: "exec",
+      description: "Run code",
+      format: { type: "text" as const },
+    }
+    const functionTool = {
+      type: "function" as const,
+      name: "exec_command",
+      description: "Run a command",
+      parameters: { type: "object", properties: {} },
+      strict: false,
+    }
+
+    expect(
+      hasCodeModeExecTool({ model: "m", input: "hi", tools: [execTool] }),
+    ).toBe(true)
+    expect(
+      hasCodeModeExecTool({ model: "m", input: "hi", tools: [functionTool] }),
+    ).toBe(false)
+    expect(hasCodeModeExecTool({ model: "m", input: "hi" })).toBe(false)
+  })
+
+  test("replays Messages-backed compactions as text for Responses backends", () => {
+    const foreign = {
+      id: "cmp-gpt",
+      type: "compaction" as const,
+      encrypted_content: "gAAAAopaque",
+    }
+    const payload: ResponsesPayload = {
+      model: "gpt-6-luna",
+      input: [
+        foreign,
+        {
+          id: "cmp-claude",
+          type: "compaction",
+          encrypted_content: encodeMessagesCompaction("Claude handoff"),
+        },
+        { role: "user", content: "Continue", type: "message" },
+      ],
+    }
+
+    expect(replaceMessagesCompactionsWithReplay(payload)).toBe(1)
+    expect(payload.input).toEqual([
+      foreign,
+      {
+        type: "message",
+        role: "user",
+        content:
+          "The previous conversation was compacted. Continue from this handoff summary:\n\nClaude handoff",
+      },
+      { role: "user", content: "Continue", type: "message" },
+    ])
+    expect(
+      replaceMessagesCompactionsWithReplay({ model: "m", input: "hi" }),
+    ).toBe(0)
   })
 
   test("loads custom tools from input.additional_tools", () => {

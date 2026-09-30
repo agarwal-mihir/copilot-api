@@ -633,10 +633,49 @@ describe("model routes", () => {
       apply_patch_tool_type: "freeform",
       supports_search_tool: false,
       supports_parallel_tool_calls: true,
-      tool_mode: "code_mode_only",
+      tool_mode: "direct",
       multi_agent_version: "v2",
       default_reasoning_level: "max",
     })
+  })
+
+  test("caps Messages-backed context and adds math guidance without touching GPT", async () => {
+    const copilotModels = createCopilotModels(["claude-opus-5.5", "gpt-6-luna"])
+    copilotModels.data[0].supported_endpoints = ["/v1/messages"]
+    copilotModels.data[0].capabilities.limits.max_context_window_tokens = 1_000_000
+    copilotModels.data[0].capabilities.limits.max_prompt_tokens = 950_000
+    copilotModels.data[1].supported_endpoints = ["/responses"]
+    copilotModels.data[1].capabilities.limits.max_context_window_tokens = 400_000
+    copilotModels.data[1].capabilities.limits.max_prompt_tokens = 400_000
+    for (const model of copilotModels.data) {
+      model.capabilities.supports.tool_calls = true
+    }
+    state.models = copilotModels
+
+    const response = await createApp().request("/v1/models?client=codex", {
+      headers: { "user-agent": "codex-cli/1.0.0" },
+    })
+
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as CodexModelsResponse
+    const opus = body.models.find((model) => model.slug === "claude-opus-5-5")!
+    const luna = body.models.find((model) => model.slug === "gpt-6-luna")!
+    expect(opus).toMatchObject({
+      context_window: 272_000,
+      max_context_window: 272_000,
+      tool_mode: "direct",
+    })
+    const opusInstructions = opus.model_messages.instructions_template ?? ""
+    expect(opusInstructions).toStartWith(
+      "You are Codex, an agent based on GPT-5.",
+    )
+    expect(opusInstructions).toContain("## Math formatting")
+    expect(opusInstructions).toContain(String.raw`\(O(n \log n)\)`)
+    expect(luna.tool_mode).toBe("code_mode_only")
+    expect(luna.context_window).toBeGreaterThan(272_000)
+    expect(luna.model_messages?.instructions_template ?? "").not.toContain(
+      "## Math formatting",
+    )
   })
 
   test("merges Responses-backed Copilot models into the Codex catalog", async () => {

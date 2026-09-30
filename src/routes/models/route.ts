@@ -337,7 +337,13 @@ function createCopilotCodexCandidate(
       model.capabilities.supports.vision ? ["text", "image"] : ["text"],
     reasoningEfforts,
     defaultReasoningEffort: selectDefaultReasoningEffort(reasoningEfforts),
+    messagesBacked: !isCodexNativeResponsesModel(model.id),
   }
+}
+
+// Mirrors the Codex branch of shouldFallbackToMessages in the Responses routes.
+function isCodexNativeResponsesModel(modelId: string): boolean {
+  return modelId.startsWith("gpt") || modelId.startsWith("codex")
 }
 
 async function getProviderCodexCandidates(

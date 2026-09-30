@@ -18,6 +18,21 @@ const ASTRA_ASYNC_QUESTION_GUIDANCE = `## Asynchronous clarification questions
 
 When the available tools include request_user_input_async, use it for optional clarification while continuing useful work that does not depend on the answer. It accepts text only; do not ask for file uploads or screenshots through this tool. Allow a bounded wait (for example, 60 seconds) for optional clarification, then proceed with a reasonable stated assumption if no answer arrives. If the tool is unavailable, ask in plain text instead. If an answer is required for safe progress, stop and ask the user rather than treating it as optional.`
 
+// Codex renders assistant math with KaTeX from \( \), \[ \], and $$ delimiters;
+// single-dollar math is shown as literal text.
+const MESSAGES_BACKED_MATH_GUIDANCE = String.raw`## Math formatting
+
+The Codex app renders LaTeX math in your messages. When a response involves mathematical notation (formulas, equations, derivations, complexity bounds, variables with subscripts or superscripts, Greek letters, fractions, sums, or matrices), write it as LaTeX instead of plain-text or Unicode approximations:
+
+- Inline math: wrap it in \( and \), for example \(O(n \log n)\) or \(\alpha_t = \beta^2\).
+- Display math: put \[ and \] on their own lines around standalone equations and multi-line derivations; use environments such as aligned inside them.
+- Do not use single dollar signs for math; the app shows $x$ as literal text.
+- Keep code, shell commands, and file contents in backticks or code blocks as usual, and never put math that should render inside backticks or code blocks.`
+
+// Messages-backed models get the GPT-sized window so Codex auto-compacts at
+// about 245K tokens instead of letting a 1M-token prompt grow uncached.
+export const MESSAGES_BACKED_CONTEXT_WINDOW = 272_000
+
 const FALLBACK_AVAILABLE_IN_PLANS: CodexModel["available_in_plans"] = [
   "business",
   "edu",
@@ -452,6 +467,17 @@ export function createSyntheticCodexModel(
     : reasoningEfforts[0]
   const supportsReasoning = reasoningEfforts.some((effort) => effort !== "none")
   const inputModalities = [...new Set(candidate.inputModalities)]
+  const messagesBacked = candidate.messagesBacked === true
+  const contextWindow =
+    messagesBacked ?
+      Math.min(candidate.contextWindow, MESSAGES_BACKED_CONTEXT_WINDOW)
+    : candidate.contextWindow
+  const extraInstructions = [
+    ...(candidate.slug === "gpt-6-astra" ?
+      [ASTRA_ASYNC_QUESTION_GUIDANCE]
+    : []),
+    ...(messagesBacked ? [MESSAGES_BACKED_MATH_GUIDANCE] : []),
+  ]
 
   return {
     ...template,
@@ -469,7 +495,9 @@ export function createSyntheticCodexModel(
     web_search_tool_type: "text_and_image",
     supports_search_tool: false,
     use_responses_lite: true,
-    tool_mode: "code_mode_only",
+    // Code mode makes Messages-backed models emit JavaScript inside a JSON
+    // string, which they frequently mis-escape; direct tools avoid that.
+    tool_mode: messagesBacked ? "direct" : "code_mode_only",
     multi_agent_version: "v2",
     shell_type: "shell_command",
     experimental_supported_tools:
@@ -477,8 +505,8 @@ export function createSyntheticCodexModel(
     input_modalities: inputModalities,
     supports_image_detail_original: false,
     supports_parallel_tool_calls: true,
-    context_window: candidate.contextWindow,
-    max_context_window: candidate.contextWindow,
+    context_window: contextWindow,
+    max_context_window: contextWindow,
     max_output_tokens: candidate.maxOutputTokens,
     auto_compact_token_limit: null,
     comp_hash: null,
@@ -496,10 +524,14 @@ export function createSyntheticCodexModel(
     upgrade: null,
     available_in_plans: template.available_in_plans,
     model_messages:
-      candidate.slug === "gpt-6-astra" ?
+      extraInstructions.length > 0 ?
         {
           ...template.model_messages,
-          instructions_template: `${template.model_messages?.instructions_template ?? DEFAULT_CODEX_TEMPLATE.model_messages.instructions_template}\n\n${ASTRA_ASYNC_QUESTION_GUIDANCE}`,
+          instructions_template: [
+            template.model_messages?.instructions_template
+              ?? DEFAULT_CODEX_TEMPLATE.model_messages.instructions_template,
+            ...extraInstructions,
+          ].join("\n\n"),
         }
       : template.model_messages,
     auto_review_model_override: null,

@@ -10,11 +10,13 @@ import type { ResponsesPayload } from "~/lib/types/responses"
 import { handleCompletionPayload } from "~/routes/messages/handler"
 import { isCodexUserAgent } from "~/routes/models/codex-models"
 
+import { bridgeForeignCompaction } from "./compaction-bridge"
 import {
   responsesResultToStreamEvents,
   translateMessagesStream,
 } from "./messages-stream-translation"
 import {
+  hasCodeModeExecTool,
   ResponsesMessagesTranslationError,
   translateAnthropicToResponses,
   translateResponsesToMessages,
@@ -24,6 +26,7 @@ import {
 const logger = createHandlerLogger("responses-messages-handler")
 
 export const responsesMessagesDependencies = {
+  bridgeForeignCompaction,
   handleCompletionPayload,
 }
 
@@ -36,15 +39,27 @@ export async function handleResponsesViaMessages(
     subagentMarker?: SubagentMarker | null
     requestId?: string
     sessionId?: string
+    defaultMaxOutputTokens?: number
   },
 ): Promise<Response> {
   try {
+    const bridged = await responsesMessagesDependencies.bridgeForeignCompaction(
+      options.payload,
+      { sessionId: options.sessionId },
+    )
+    if (bridged !== "none") {
+      logger.info(`Foreign compaction for ${options.publicModel}: ${bridged}`)
+    }
+
     const translation = translateResponsesToMessages(
       { ...options.payload, model: options.publicModel },
       {
+        defaultMaxOutputTokens: options.defaultMaxOutputTokens,
         model: options.targetModel,
         publicModel: options.publicModel,
-        toolCallTips: isCodexUserAgent(c.req.header("user-agent")),
+        toolCallTips:
+          isCodexUserAgent(c.req.header("user-agent"))
+          && hasCodeModeExecTool(options.payload),
       },
     )
     const context: MessagesResponseTranslationContext = translation

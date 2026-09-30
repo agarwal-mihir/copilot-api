@@ -3,8 +3,12 @@ import { Hono, type Context } from "hono"
 
 import { COMPACT_REQUEST } from "~/lib/compact"
 import type { AnthropicMessagesPayload } from "~/lib/types/anthropic"
+import type { ResponsesPayload } from "~/lib/types/responses"
 import type { CompletionPayloadOptions } from "~/routes/messages/handler"
-import { MESSAGES_TOOL_CALL_TIPS } from "~/routes/responses/messages-translation"
+import {
+  encodeMessagesCompaction,
+  MESSAGES_TOOL_CALL_TIPS,
+} from "~/routes/responses/messages-translation"
 import type { createResponses as createCopilotResponses } from "~/services/copilot/create-responses"
 
 let responsesApiWebSocketEnabled = true
@@ -737,6 +741,12 @@ describe("responses handler token usage", () => {
         ),
     )
     responsesMessagesDependencies.handleCompletionPayload = handleMessages
+    const execTool = {
+      type: "custom",
+      name: "exec",
+      description: "Run code",
+      format: { type: "text" },
+    }
 
     const app = createApp()
     const codexResponse = await app.request("/v1/responses", {
@@ -744,6 +754,7 @@ describe("responses handler token usage", () => {
         model: "claude-tips",
         instructions: "Base instructions",
         input: "hello",
+        tools: [execTool],
       }),
       headers: {
         "content-type": "application/json",
@@ -756,14 +767,28 @@ describe("responses handler token usage", () => {
         model: "claude-tips",
         instructions: "Base instructions",
         input: "hello",
+        tools: [execTool],
       }),
       headers: { "content-type": "application/json" },
+      method: "POST",
+    })
+    const directModeResponse = await app.request("/v1/responses", {
+      body: JSON.stringify({
+        model: "claude-tips",
+        instructions: "Base instructions",
+        input: "hello",
+      }),
+      headers: {
+        "content-type": "application/json",
+        "user-agent": "codex-cli/1.0.0",
+      },
       method: "POST",
     })
 
     expect(codexResponse.status).toBe(200)
     expect(otherResponse.status).toBe(200)
-    expect(handleMessages).toHaveBeenCalledTimes(2)
+    expect(directModeResponse.status).toBe(200)
+    expect(handleMessages).toHaveBeenCalledTimes(3)
     expect(handleMessages.mock.calls[0]?.[1].system).toEqual([
       {
         type: "text",
@@ -777,6 +802,189 @@ describe("responses handler token usage", () => {
         text: "Base instructions",
         cache_control: { type: "ephemeral" },
       },
+    ])
+    expect(handleMessages.mock.calls[2]?.[1].system).toEqual([
+      {
+        type: "text",
+        text: "Base instructions",
+        cache_control: { type: "ephemeral" },
+      },
+    ])
+  })
+
+  test("uses the model output limit for streaming Messages-backed requests", async () => {
+    state.models = {
+      object: "list",
+      data: [
+        {
+          capabilities: {
+            family: "claude",
+            limits: { max_output_tokens: 128_000, max_prompt_tokens: 128000 },
+            object: "model_capabilities",
+            supports: { tool_calls: true },
+            tokenizer: "o200k_base",
+            type: "chat",
+          },
+          id: "claude-limits",
+          model_picker_enabled: true,
+          name: "Claude Limits",
+          object: "model",
+          preview: false,
+          supported_endpoints: ["/v1/messages"],
+          vendor: "anthropic",
+          version: "test",
+        },
+      ],
+    }
+    const handleMessages = mock(
+      (_context: Context, _payload: AnthropicMessagesPayload) =>
+        Promise.resolve(
+          Response.json({
+            content: [{ type: "text", text: "hi" }],
+            id: "msg-limits",
+            model: "claude-limits",
+            role: "assistant",
+            stop_reason: "end_turn",
+            stop_sequence: null,
+            type: "message",
+            usage: { input_tokens: 4, output_tokens: 2 },
+          }),
+        ),
+    )
+    responsesMessagesDependencies.handleCompletionPayload = handleMessages
+
+    const app = createApp()
+    for (const stream of [true, false]) {
+      const response = await app.request("/v1/responses", {
+        body: JSON.stringify({ model: "claude-limits", input: "hi", stream }),
+        headers: {
+          "content-type": "application/json",
+          "user-agent": "codex-cli/1.0.0",
+        },
+        method: "POST",
+      })
+      expect(response.status).toBe(200)
+      await response.text()
+    }
+
+    expect(handleMessages.mock.calls[0]?.[1].max_tokens).toBe(128_000)
+    expect(handleMessages.mock.calls[1]?.[1].max_tokens).toBe(32_000)
+  })
+
+  test("bridges foreign compactions before translating Messages requests", async () => {
+    state.models = {
+      object: "list",
+      data: [
+        {
+          capabilities: {
+            family: "claude",
+            limits: { max_prompt_tokens: 128000 },
+            object: "model_capabilities",
+            supports: { tool_calls: true },
+            tokenizer: "o200k_base",
+            type: "chat",
+          },
+          id: "claude-bridge",
+          model_picker_enabled: true,
+          name: "Claude Bridge",
+          object: "model",
+          preview: false,
+          supported_endpoints: ["/v1/messages"],
+          vendor: "anthropic",
+          version: "test",
+        },
+      ],
+    }
+    const bridge = mock((payload: ResponsesPayload) => {
+      payload.input = [
+        {
+          id: "cmp-gpt",
+          type: "compaction",
+          encrypted_content: encodeMessagesCompaction("Bridged summary"),
+        },
+      ]
+      return Promise.resolve("bridged" as const)
+    })
+    responsesMessagesDependencies.bridgeForeignCompaction = bridge
+    const handleMessages = mock(
+      (_context: Context, _payload: AnthropicMessagesPayload) =>
+        Promise.resolve(
+          Response.json({
+            content: [{ type: "text", text: "hi" }],
+            id: "msg-bridge",
+            model: "claude-bridge",
+            role: "assistant",
+            stop_reason: "end_turn",
+            stop_sequence: null,
+            type: "message",
+            usage: { input_tokens: 4, output_tokens: 2 },
+          }),
+        ),
+    )
+    responsesMessagesDependencies.handleCompletionPayload = handleMessages
+
+    const response = await createApp().request("/v1/responses", {
+      body: JSON.stringify({
+        model: "claude-bridge",
+        input: [
+          { id: "cmp-gpt", type: "compaction", encrypted_content: "gAAAA" },
+        ],
+      }),
+      headers: {
+        "content-type": "application/json",
+        "user-agent": "codex-cli/1.0.0",
+      },
+      method: "POST",
+    })
+
+    expect(response.status).toBe(200)
+    expect(bridge).toHaveBeenCalledTimes(1)
+    expect(handleMessages.mock.calls[0]?.[1].messages[0]).toEqual({
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: "The previous conversation was compacted. Continue from this handoff summary:\n\nBridged summary",
+          cache_control: { type: "ephemeral" },
+        },
+      ],
+    })
+  })
+
+  test("replays Messages-backed compactions for native Responses models", async () => {
+    createResponses.mockImplementationOnce(() =>
+      Promise.resolve(createResponsesResult("gpt-test")),
+    )
+
+    const response = await createApp().request("/v1/responses", {
+      body: JSON.stringify({
+        model: "gpt-test",
+        input: [
+          {
+            id: "cmp-claude",
+            type: "compaction",
+            encrypted_content: encodeMessagesCompaction("Claude handoff"),
+          },
+          { role: "user", content: "Continue", type: "message" },
+        ],
+      }),
+      headers: {
+        "content-type": "application/json",
+        "user-agent": "codex-cli/1.0.0",
+      },
+      method: "POST",
+    })
+
+    expect(response.status).toBe(200)
+    const forwarded = createResponses.mock.calls.at(-1)?.[0]
+    expect(forwarded?.input).toEqual([
+      {
+        type: "message",
+        role: "user",
+        content:
+          "The previous conversation was compacted. Continue from this handoff summary:\n\nClaude handoff",
+      },
+      { role: "user", content: "Continue", type: "message" },
     ])
   })
 
