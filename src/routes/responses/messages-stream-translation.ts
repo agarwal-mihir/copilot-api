@@ -68,6 +68,8 @@ type StreamBlockState =
   | StreamMessageState
   | StreamReasoningState
 
+type MessagePhase = NonNullable<ResponseOutputMessage["phase"]>
+
 interface TranslationState {
   blocks: Map<number, StreamBlockState>
   compactionText: string
@@ -75,6 +77,8 @@ interface TranslationState {
   context: MessagesResponseTranslationContext
   copilotUsage: ResponsesResult["copilot_usage"]
   createdAt: number
+  heldEvents: Array<ResponseStreamEvent>
+  heldMessages: Array<ResponseOutputMessage>
   initialized: boolean
   messageStopped: boolean
   model: string
@@ -108,7 +112,7 @@ export async function* translateMessagesStream(
         yield createLifecycleEvent(state, "response.in_progress")
       }
 
-      for (const translated of translateEvent(state, event)) {
+      for (const translated of translatePhasedEvent(state, event)) {
         yield translated
       }
       if (state.messageStopped) break
@@ -138,6 +142,7 @@ export async function* translateMessagesStream(
       yield createLifecycleEvent(state, "response.created")
       yield createLifecycleEvent(state, "response.in_progress")
     }
+    for (const held of releaseHeldEvents(state)) yield held
     yield createErrorEvent(state, error)
     yield createFailedEvent(state, error)
   }
@@ -313,6 +318,8 @@ function createTranslationState(
     context,
     copilotUsage: null,
     createdAt: Math.floor(Date.now() / 1000),
+    heldEvents: [],
+    heldMessages: [],
     initialized: false,
     messageStopped: false,
     model: context.publicModel,
@@ -336,6 +343,91 @@ function initializeState(
     state.copilotUsage = event.message.copilot_usage ?? null
   }
   state.initialized = true
+}
+
+/**
+ * Codex folds `commentary` messages under "Worked for" and shows the
+ * `final_answer`. A Claude text block's phase is only known once a tool call
+ * starts or the stop reason arrives, so its `output_item.done` (and anything
+ * after it) is held until then. Released events keep their original order.
+ */
+function* translatePhasedEvent(
+  state: TranslationState,
+  event: Exclude<AnthropicStreamEventData, { type: "error" | "ping" }>,
+): Generator<ResponseStreamEvent> {
+  if (state.heldMessages.length > 0) {
+    const phase = resolveHeldMessagePhase(state, event)
+    if (phase) {
+      for (const held of releaseHeldEvents(state, phase)) yield held
+    }
+  }
+
+  for (const translated of translateEvent(state, event)) {
+    if (
+      translated.type === "response.output_item.done"
+      && translated.item.type === "message"
+    ) {
+      if (state.stopReason) {
+        translated.item.phase = phaseForStopReason(state.stopReason)
+      } else {
+        state.heldMessages.push(translated.item)
+      }
+    }
+    if (state.heldEvents.length > 0 || state.heldMessages.length > 0) {
+      state.heldEvents.push(translated)
+    } else {
+      yield translated
+    }
+  }
+
+  if (event.type === "message_stop") {
+    for (const held of releaseHeldEvents(
+      state,
+      phaseForStopReason(state.stopReason),
+    )) {
+      yield held
+    }
+  }
+}
+
+function resolveHeldMessagePhase(
+  state: TranslationState,
+  event: Exclude<AnthropicStreamEventData, { type: "error" | "ping" }>,
+): MessagePhase | undefined {
+  if (event.type === "content_block_start") {
+    const blockType = event.content_block.type
+    return blockType === "tool_use" || blockType === "server_tool_use" ?
+        "commentary"
+      : undefined
+  }
+  if (event.type === "message_delta" && event.delta.stop_reason) {
+    return phaseForStopReason(event.delta.stop_reason)
+  }
+  if (event.type === "message_stop") {
+    return phaseForStopReason(state.stopReason)
+  }
+  return undefined
+}
+
+function phaseForStopReason(
+  stopReason: AnthropicResponse["stop_reason"],
+): MessagePhase {
+  return stopReason === "tool_use" || stopReason === "pause_turn" ?
+      "commentary"
+    : "final_answer"
+}
+
+function* releaseHeldEvents(
+  state: TranslationState,
+  phase?: MessagePhase,
+): Generator<ResponseStreamEvent> {
+  if (phase) {
+    for (const message of state.heldMessages) message.phase = phase
+  }
+  const events = state.heldEvents
+  state.heldEvents = []
+  state.heldMessages = []
+  for (const event of events) yield event
 }
 
 function* translateEvent(

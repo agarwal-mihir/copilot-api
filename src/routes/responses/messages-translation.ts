@@ -989,6 +989,14 @@ function translateAssistantOutput(
   registry: MessagesToolRegistry,
 ): Array<ResponseOutputItem> {
   const output: Array<ResponseOutputItem> = []
+  const phase =
+    (
+      response.stop_reason === "tool_use"
+      || response.stop_reason === "pause_turn"
+      || response.content.some((block) => block.type === "tool_use")
+    ) ?
+      "commentary"
+    : "final_answer"
   for (const [index, block] of response.content.entries()) {
     if (block.type === "thinking") {
       output.push({
@@ -1017,6 +1025,7 @@ function translateAssistantOutput(
             annotations: [],
           },
         ],
+        phase,
       })
       continue
     }

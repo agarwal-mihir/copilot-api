@@ -304,6 +304,7 @@ export interface ResponseOutputMessage {
   role: "assistant"
   status: "completed" | "in_progress" | "incomplete"
   content?: Array<ResponseOutputContentBlock>
+  phase?: "commentary" | "final_answer"
 }
 
 export interface ResponseOutputReasoning {

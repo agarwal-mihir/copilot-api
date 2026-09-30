@@ -40,6 +40,138 @@ const expectCanonicalBase64 = (value: string | undefined) => {
   expect(Buffer.from(value, "base64").toString("base64")).toBe(value)
 }
 
+const applyPatchStreamTranslation = () =>
+  translate({
+    input: [
+      {
+        role: "developer",
+        tools: [{ type: "custom", name: "apply_patch" }],
+        type: "additional_tools",
+      },
+      { role: "user", content: "Patch it", type: "message" },
+    ],
+    stream: true,
+  })
+
+const streamStart = (id: string) => ({
+  type: "message_start",
+  message: {
+    content: [],
+    id,
+    model: "claude-sonnet-4.6",
+    role: "assistant",
+    stop_reason: null,
+    stop_sequence: null,
+    type: "message",
+    usage: { input_tokens: 2, output_tokens: 0 },
+  },
+})
+
+const streamTextBlock = (index: number, text: string) => [
+  {
+    type: "content_block_start",
+    index,
+    content_block: { type: "text", text: "" },
+  },
+  { type: "content_block_delta", index, delta: { type: "text_delta", text } },
+  { type: "content_block_stop", index },
+]
+
+const streamThinkingBlock = (index: number) => [
+  {
+    type: "content_block_start",
+    index,
+    content_block: { type: "thinking", thinking: "" },
+  },
+  {
+    type: "content_block_delta",
+    index,
+    delta: { type: "thinking_delta", thinking: "Consider the file" },
+  },
+  {
+    type: "content_block_delta",
+    index,
+    delta: { type: "signature_delta", signature: "sig" },
+  },
+  { type: "content_block_stop", index },
+]
+
+const streamApplyPatchBlock = (index: number) => [
+  {
+    type: "content_block_start",
+    index,
+    content_block: {
+      type: "tool_use",
+      id: `call-${index}`,
+      name: "apply_patch",
+      input: {},
+    },
+  },
+  {
+    type: "content_block_delta",
+    index,
+    delta: {
+      type: "input_json_delta",
+      partial_json: '{"input":"*** Begin Patch"}',
+    },
+  },
+  { type: "content_block_stop", index },
+]
+
+const streamStop = (stopReason: string | null) => [
+  ...(stopReason ?
+    [
+      {
+        type: "message_delta",
+        delta: { stop_reason: stopReason, stop_sequence: null },
+        usage: { output_tokens: 3 },
+      },
+    ]
+  : []),
+  { type: "message_stop" },
+]
+
+const collectMessagesStream = async (
+  source: Array<unknown>,
+  translation: ReturnType<typeof translate>,
+) => {
+  async function* chunks() {
+    await Promise.resolve()
+    for (const event of source) yield { data: JSON.stringify(event) }
+  }
+  const events: Array<ResponseStreamEvent> = []
+  for await (const event of translateMessagesStream(chunks(), translation)) {
+    events.push(event)
+  }
+  return events
+}
+
+const outputItemTimeline = (events: Array<ResponseStreamEvent>) =>
+  events.flatMap((event) =>
+    (
+      event.type === "response.output_item.added"
+      || event.type === "response.output_item.done"
+    ) ?
+      [`${event.type.replace("response.output_item.", "")}:${event.item.type}`]
+    : [],
+  )
+
+const streamedMessagePhases = (events: Array<ResponseStreamEvent>) =>
+  events.flatMap((event) =>
+    (
+      event.type === "response.output_item.done"
+      && event.item.type === "message"
+    ) ?
+      [event.item.phase ?? "none"]
+    : [],
+  )
+
+const expectConsecutiveSequence = (events: Array<ResponseStreamEvent>) => {
+  expect(events.map((event) => event.sequence_number)).toEqual(
+    events.map((_, index) => index),
+  )
+}
+
 describe("Responses Lite to Messages translation", () => {
   test("prefers request session affinity for metadata user id", () => {
     const result = requestContext.run(
@@ -1576,5 +1708,159 @@ describe("Responses Lite to Messages translation", () => {
     if (failed?.type === "response.failed") {
       expect(failed.response.status).toBe("failed")
     }
+  })
+
+  test("marks streamed text before a tool call as commentary", async () => {
+    const events = await collectMessagesStream(
+      [
+        streamStart("msg_phase_tool"),
+        ...streamTextBlock(0, "I'll patch the file."),
+        ...streamApplyPatchBlock(1),
+        ...streamStop("tool_use"),
+      ],
+      applyPatchStreamTranslation(),
+    )
+
+    expect(streamedMessagePhases(events)).toEqual(["commentary"])
+    expect(outputItemTimeline(events)).toEqual([
+      "added:message",
+      "done:message",
+      "added:custom_tool_call",
+      "done:custom_tool_call",
+    ])
+    expectConsecutiveSequence(events)
+    expect(events.at(-1)?.type).toBe("response.completed")
+  })
+
+  test("marks streamed text that ends the turn as the final answer", async () => {
+    const events = await collectMessagesStream(
+      [
+        streamStart("msg_phase_final"),
+        ...streamThinkingBlock(0),
+        ...streamTextBlock(1, "Done."),
+        ...streamStop("end_turn"),
+      ],
+      translate({ input: "hello", stream: true }),
+    )
+
+    expect(streamedMessagePhases(events)).toEqual(["final_answer"])
+    expect(outputItemTimeline(events)).toEqual([
+      "added:reasoning",
+      "done:reasoning",
+      "added:message",
+      "done:message",
+    ])
+    expectConsecutiveSequence(events)
+    expect(events.at(-1)?.type).toBe("response.completed")
+  })
+
+  test("holds interleaved thinking until the next tool call resolves the phase", async () => {
+    const events = await collectMessagesStream(
+      [
+        streamStart("msg_phase_interleaved"),
+        ...streamTextBlock(0, "Checking first."),
+        ...streamThinkingBlock(1),
+        ...streamApplyPatchBlock(2),
+        ...streamStop("tool_use"),
+      ],
+      applyPatchStreamTranslation(),
+    )
+
+    expect(streamedMessagePhases(events)).toEqual(["commentary"])
+    expect(outputItemTimeline(events)).toEqual([
+      "added:message",
+      "done:message",
+      "added:reasoning",
+      "done:reasoning",
+      "added:custom_tool_call",
+      "done:custom_tool_call",
+    ])
+    expectConsecutiveSequence(events)
+  })
+
+  test("resolves phases for text closed by message_stop or without a stop reason", async () => {
+    const [start, delta, stop] = streamTextBlock(0, "Answer")
+    const cases = [
+      [start, delta, ...streamStop(null)],
+      [start, delta, stop, ...streamStop(null)],
+      [start, delta, ...streamStop("end_turn")],
+      [start, delta, ...streamStop("tool_use")],
+    ]
+    const phases = []
+    for (const [index, source] of cases.entries()) {
+      const events = await collectMessagesStream(
+        [streamStart(`msg_phase_edge_${index}`), ...source],
+        translate({ input: "hello", stream: true }),
+      )
+      expectConsecutiveSequence(events)
+      expect(events.at(-1)?.type).toBe("response.completed")
+      phases.push(...streamedMessagePhases(events))
+    }
+
+    expect(phases).toEqual([
+      "final_answer",
+      "final_answer",
+      "final_answer",
+      "commentary",
+    ])
+  })
+
+  test("releases held text without a phase when the stream breaks", async () => {
+    const events = await collectMessagesStream(
+      [streamStart("msg_phase_cut"), ...streamTextBlock(0, "Partial update")],
+      translate({ input: "hello", stream: true }),
+    )
+
+    expect(streamedMessagePhases(events)).toEqual(["none"])
+    expect(events.slice(-3).map((event) => event.type)).toEqual([
+      "response.output_item.done",
+      "error",
+      "response.failed",
+    ])
+    expectConsecutiveSequence(events)
+  })
+
+  test("sets message phases on non-streaming Messages results", () => {
+    const base = {
+      id: "msg_phase",
+      model: "claude-sonnet-4.6",
+      role: "assistant",
+      stop_sequence: null,
+      type: "message",
+      usage: { input_tokens: 10, output_tokens: 4 },
+    } as const
+    const withTool = translateAnthropicToResponses(
+      {
+        ...base,
+        content: [
+          { type: "text", text: "Patching." },
+          {
+            type: "tool_use",
+            id: "call-1",
+            name: "apply_patch",
+            input: { input: "*** Begin Patch" },
+          },
+        ],
+        stop_reason: "tool_use",
+      },
+      applyPatchStreamTranslation(),
+    )
+    const finalOnly = translateAnthropicToResponses(
+      {
+        ...base,
+        content: [{ type: "text", text: "All done." }],
+        stop_reason: "end_turn",
+      },
+      translate({ input: "hello" }),
+    )
+
+    expect(withTool.output[0]).toMatchObject({
+      type: "message",
+      phase: "commentary",
+    })
+    expect(finalOnly.output[0]).toMatchObject({
+      type: "message",
+      phase: "final_answer",
+    })
   })
 })
