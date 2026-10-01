@@ -7,6 +7,7 @@ import type { ResponsesPayload } from "~/lib/types/responses"
 import type { CompletionPayloadOptions } from "~/routes/messages/handler"
 import {
   encodeMessagesCompaction,
+  MESSAGES_COMPACTION_REPLAY_NOTE,
   MESSAGES_TOOL_CALL_TIPS,
 } from "~/routes/responses/messages-translation"
 import type { createResponses as createCopilotResponses } from "~/services/copilot/create-responses"
@@ -944,7 +945,7 @@ describe("responses handler token usage", () => {
       content: [
         {
           type: "text",
-          text: "The previous conversation was compacted. Continue from this handoff summary:\n\nBridged summary",
+          text: `The previous conversation was compacted. Continue from this handoff summary:\n\nBridged summary${MESSAGES_COMPACTION_REPLAY_NOTE}`,
           cache_control: { type: "ephemeral" },
         },
       ],

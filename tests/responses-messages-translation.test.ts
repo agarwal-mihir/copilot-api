@@ -11,6 +11,7 @@ import {
   encodeMessagesCompaction,
   hasCodeModeExecTool,
   MESSAGES_COMPACTION_PREFIX,
+  MESSAGES_COMPACTION_REPLAY_NOTE,
   MESSAGES_TOOL_CALL_TIPS,
   replaceMessagesCompactionsWithReplay,
   ResponsesMessagesTranslationError,
@@ -552,8 +553,7 @@ describe("Responses Lite to Messages translation", () => {
     expect(result.messagesPayload.messages).toEqual([
       {
         role: "user",
-        content:
-          "The previous conversation was compacted. Continue from this handoff summary:\n\nExisting handoff",
+        content: `The previous conversation was compacted. Continue from this handoff summary:\n\nExisting handoff${MESSAGES_COMPACTION_REPLAY_NOTE}`,
       },
       {
         role: "user",
@@ -566,6 +566,83 @@ describe("Responses Lite to Messages translation", () => {
         ],
       },
     ])
+  })
+
+  test("keeps Codex context placed before the latest compaction", () => {
+    const result = translate({
+      input: [
+        { role: "user", content: "Earlier request", type: "message" },
+        {
+          id: "cmp-old",
+          type: "compaction",
+          encrypted_content: encodeMessagesCompaction("Old handoff"),
+        },
+        { role: "assistant", content: "Old answer", type: "message" },
+        {
+          type: "function_call",
+          call_id: "old-call",
+          name: "exec_command",
+          arguments: '{"cmd":"cat old"}',
+        },
+        { type: "function_call_output", call_id: "old-call", output: "old" },
+        { role: "developer", content: "<app-context> Memory", type: "message" },
+        {
+          role: "user",
+          content: "# AGENTS.md instructions for /w",
+          type: "message",
+        },
+        { role: "user", content: "Current request", type: "message" },
+        {
+          id: "cmp-new",
+          type: "compaction",
+          encrypted_content: encodeMessagesCompaction("New handoff"),
+        },
+        {
+          type: "function_call",
+          call_id: "new-call",
+          name: "exec_command",
+          arguments: '{"cmd":"ls"}',
+        },
+        { type: "function_call_output", call_id: "new-call", output: "files" },
+      ],
+    })
+
+    expect(result.messagesPayload.system).toBeUndefined()
+    expect(result.messagesPayload.messages).toEqual([
+      { role: "user", content: "Earlier request" },
+      { role: "user", content: "<app-context> Memory" },
+      { role: "user", content: "# AGENTS.md instructions for /w" },
+      { role: "user", content: "Current request" },
+      {
+        role: "user",
+        content: `The previous conversation was compacted. Continue from this handoff summary:\n\nNew handoff${MESSAGES_COMPACTION_REPLAY_NOTE}`,
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "new-call",
+            name: "exec_command",
+            input: { cmd: "ls" },
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "new-call",
+            content: "files",
+            is_error: false,
+            cache_control: { type: "ephemeral" },
+          },
+        ],
+      },
+    ])
+    expect(MESSAGES_COMPACTION_REPLAY_NOTE).toContain("memory registry")
+    expect(MESSAGES_COMPACTION_REPLAY_NOTE).toContain("repository's AGENTS.md")
   })
 
   test("encodes compaction content as canonical Base64", () => {

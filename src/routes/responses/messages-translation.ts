@@ -68,6 +68,8 @@ export const MESSAGES_TOOL_CALL_TIPS = [
 
 const COMPACTION_REPLAY_PROMPT =
   "The previous conversation was compacted. Continue from this handoff summary:\n\n"
+export const MESSAGES_COMPACTION_REPLAY_NOTE =
+  "\n\nCompaction removed earlier tool output, including files you read and memory search results. Before continuing, redo the startup steps for the current request: apply the Memory section (search the memory registry when it applies) and re-read what AGENTS.md requires for this task, such as skill files, the repository's AGENTS.md, or campaign documents. Then continue from the summary without repeating finished work."
 const MAX_DEVELOPER_PROMPTS = 5
 const TOOL_NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u
 const CUSTOM_TOOL_INPUT_SCHEMA: Record<string, unknown> = {
@@ -406,12 +408,30 @@ function normalizeResponsesInput(
   const replayMessage: ResponseInputMessage = {
     type: "message",
     role: "user",
-    content: `${COMPACTION_REPLAY_PROMPT}${summary}`,
+    content: `${COMPACTION_REPLAY_PROMPT}${summary}${MESSAGES_COMPACTION_REPLAY_NOTE}`,
   }
+  // Codex re-injects its context (AGENTS.md, Memory, permissions) and the
+  // recent user messages before the compaction item; the summary replaces
+  // only the earlier assistant and tool items.
   return {
     compaction,
-    input: [replayMessage, ...withoutTrigger.slice(latestCompactionIndex + 1)],
+    input: [
+      ...withoutTrigger
+        .slice(0, latestCompactionIndex)
+        .filter(isContextBeforeCompaction),
+      replayMessage,
+      ...withoutTrigger.slice(latestCompactionIndex + 1),
+    ],
   }
+}
+
+function isContextBeforeCompaction(item: ResponseInputItem): boolean {
+  const type = getItemType(item)
+  if (type === "agent_message") return true
+  return (
+    (type === undefined || type === "message")
+    && getStringField(item, "role") !== "assistant"
+  )
 }
 
 function createToolRegistry(payload: ResponsesPayload): MessagesToolRegistry {

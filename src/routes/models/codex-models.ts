@@ -14,7 +14,7 @@ import { createProviderProxyResponse } from "~/services/providers/provider-proxy
 
 const logger = createHandlerLogger("codex-models-handler")
 const CODEX_USER_AGENT_PATTERN = /^codex/iu
-const ASTRA_ASYNC_QUESTION_GUIDANCE = `## Asynchronous clarification questions
+const ASYNC_QUESTION_GUIDANCE = `## Asynchronous clarification questions
 
 When the available tools include request_user_input_async, use it for optional clarification while continuing useful work that does not depend on the answer. It accepts text only; do not ask for file uploads or screenshots through this tool. Allow a bounded wait (for example, 60 seconds) for optional clarification, then proceed with a reasonable stated assumption if no answer arrives. If the tool is unavailable, ask in plain text instead. If an answer is required for safe progress, stop and ask the user rather than treating it as optional.`
 
@@ -35,9 +35,9 @@ const MESSAGES_BACKED_CONTEXT_GUIDANCE = `## Codex context and AGENTS.md
 
 Codex adds configuration context to the conversation, sometimes as user-role text after compaction or a model switch: \`# AGENTS.md instructions for <directory>\`, \`<app-context>\` (including its Memory section), \`<skills_instructions>\`, \`<plugins_instructions>\`, \`<permissions instructions>\`, \`<collaboration_mode>\`, \`<environment_context>\`, and \`<model_switch>\`. Treat these as binding instructions from the user's setup, wherever they appear. The latest instance of each wins, and direct instructions from the user in the conversation take precedence.
 
-At the start of every new user request, before other work:
+At the start of every new user request, and again after any compaction (including one in the middle of a request), before other work:
 - Apply the Memory section: when it says memory applies to this kind of request, search the memory registry first.
-- Do the reads that AGENTS.md requires for this kind of task, such as skill files, a repository's AGENTS.md, or campaign documents. Re-read them unless their full contents are already visible in the current context; compaction removes earlier reads.
+- Do the reads that AGENTS.md requires for this kind of task, such as skill files, a repository's AGENTS.md, or campaign documents. Re-read them unless their full, untruncated contents are already visible in the current context; compaction removes earlier reads, and truncated tool output does not count.
 - When the user names a skill, or the task clearly matches a listed skill's description, open its SKILL.md before acting.
 
 An AGENTS.md file applies to the directory tree that contains it, and a more deeply nested one takes precedence. Before working in a directory below or outside the current working directory, check for AGENTS.md files that apply there. Keep these reads brief and targeted.`
@@ -485,10 +485,10 @@ export function createSyntheticCodexModel(
     messagesBacked ?
       Math.min(candidate.contextWindow, MESSAGES_BACKED_CONTEXT_WINDOW)
     : candidate.contextWindow
+  const supportsAsyncQuestions =
+    candidate.slug === "gpt-6-astra" || messagesBacked
   const extraInstructions = [
-    ...(candidate.slug === "gpt-6-astra" ?
-      [ASTRA_ASYNC_QUESTION_GUIDANCE]
-    : []),
+    ...(supportsAsyncQuestions ? [ASYNC_QUESTION_GUIDANCE] : []),
     ...(messagesBacked ?
       [MESSAGES_BACKED_MATH_GUIDANCE, MESSAGES_BACKED_CONTEXT_GUIDANCE]
     : []),
@@ -516,7 +516,7 @@ export function createSyntheticCodexModel(
     multi_agent_version: "v2",
     shell_type: "shell_command",
     experimental_supported_tools:
-      candidate.slug === "gpt-6-astra" ? ["request_user_input_async"] : [],
+      supportsAsyncQuestions ? ["request_user_input_async"] : [],
     input_modalities: inputModalities,
     supports_image_detail_original: false,
     supports_parallel_tool_calls: true,

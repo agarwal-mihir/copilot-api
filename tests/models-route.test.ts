@@ -673,11 +673,23 @@ describe("model routes", () => {
     expect(opusInstructions).toContain(String.raw`\(O(n \log n)\)`)
     expect(opusInstructions).toContain("## Codex context and AGENTS.md")
     expect(opusInstructions).toContain("At the start of every new user request")
+    expect(opusInstructions).toContain("again after any compaction")
+    expect(opusInstructions).toContain("full, untruncated contents")
+    expect(opus.experimental_supported_tools).toEqual([
+      "request_user_input_async",
+    ])
+    expect(opusInstructions).toContain(
+      "## Asynchronous clarification questions",
+    )
+    expect(luna.experimental_supported_tools).toEqual([])
     expect(luna.tool_mode).toBe("code_mode_only")
     expect(luna.context_window).toBeGreaterThan(272_000)
     const lunaInstructions = luna.model_messages?.instructions_template ?? ""
     expect(lunaInstructions).not.toContain("## Math formatting")
     expect(lunaInstructions).not.toContain("## Codex context and AGENTS.md")
+    expect(lunaInstructions).not.toContain(
+      "## Asynchronous clarification questions",
+    )
   })
 
   test("merges Responses-backed Copilot models into the Codex catalog", async () => {
