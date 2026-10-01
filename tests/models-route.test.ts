@@ -671,11 +671,13 @@ describe("model routes", () => {
     )
     expect(opusInstructions).toContain("## Math formatting")
     expect(opusInstructions).toContain(String.raw`\(O(n \log n)\)`)
+    expect(opusInstructions).toContain("## Codex context and AGENTS.md")
+    expect(opusInstructions).toContain("At the start of every new user request")
     expect(luna.tool_mode).toBe("code_mode_only")
     expect(luna.context_window).toBeGreaterThan(272_000)
-    expect(luna.model_messages?.instructions_template ?? "").not.toContain(
-      "## Math formatting",
-    )
+    const lunaInstructions = luna.model_messages?.instructions_template ?? ""
+    expect(lunaInstructions).not.toContain("## Math formatting")
+    expect(lunaInstructions).not.toContain("## Codex context and AGENTS.md")
   })
 
   test("merges Responses-backed Copilot models into the Codex catalog", async () => {

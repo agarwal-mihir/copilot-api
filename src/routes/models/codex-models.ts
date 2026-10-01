@@ -29,6 +29,19 @@ The Codex app renders LaTeX math in your messages. When a response involves math
 - Do not use single dollar signs for math; the app shows $x$ as literal text.
 - Keep code, shell commands, and file contents in backticks or code blocks as usual, and never put math that should render inside backticks or code blocks.`
 
+// GPT models are trained on Codex's context conventions; Messages-backed
+// models receive the same context as ordinary user text and need them spelled out.
+const MESSAGES_BACKED_CONTEXT_GUIDANCE = `## Codex context and AGENTS.md
+
+Codex adds configuration context to the conversation, sometimes as user-role text after compaction or a model switch: \`# AGENTS.md instructions for <directory>\`, \`<app-context>\` (including its Memory section), \`<skills_instructions>\`, \`<plugins_instructions>\`, \`<permissions instructions>\`, \`<collaboration_mode>\`, \`<environment_context>\`, and \`<model_switch>\`. Treat these as binding instructions from the user's setup, wherever they appear. The latest instance of each wins, and direct instructions from the user in the conversation take precedence.
+
+At the start of every new user request, before other work:
+- Apply the Memory section: when it says memory applies to this kind of request, search the memory registry first.
+- Do the reads that AGENTS.md requires for this kind of task, such as skill files, a repository's AGENTS.md, or campaign documents. Re-read them unless their full contents are already visible in the current context; compaction removes earlier reads.
+- When the user names a skill, or the task clearly matches a listed skill's description, open its SKILL.md before acting.
+
+An AGENTS.md file applies to the directory tree that contains it, and a more deeply nested one takes precedence. Before working in a directory below or outside the current working directory, check for AGENTS.md files that apply there. Keep these reads brief and targeted.`
+
 // Messages-backed models get the GPT-sized window so Codex auto-compacts at
 // about 245K tokens instead of letting a 1M-token prompt grow uncached.
 export const MESSAGES_BACKED_CONTEXT_WINDOW = 272_000
@@ -476,7 +489,9 @@ export function createSyntheticCodexModel(
     ...(candidate.slug === "gpt-6-astra" ?
       [ASTRA_ASYNC_QUESTION_GUIDANCE]
     : []),
-    ...(messagesBacked ? [MESSAGES_BACKED_MATH_GUIDANCE] : []),
+    ...(messagesBacked ?
+      [MESSAGES_BACKED_MATH_GUIDANCE, MESSAGES_BACKED_CONTEXT_GUIDANCE]
+    : []),
   ]
 
   return {
